@@ -117,12 +117,8 @@ fn select_drive(config: &Config) -> Result<bool> {
         app.print_help()?;
         return Ok(false);
     }
-    let config = Config {
-        navigators: Vec::new(),
-        drivers: Vec::new(),
-    };
-    let ids = select_ids_from(Kind::Navigator, &config)?;
-    run_drive(ids, &config)
+    let ids = select_ids_from(Kind::Navigator, config)?;
+    run_drive(ids, config)
 }
 
 fn select_delete(kind: Kind, config: &mut Config) -> Result<bool> {
