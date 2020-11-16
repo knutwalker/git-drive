@@ -11,7 +11,7 @@ default-run = "git-drive"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = "3.0.0-beta.2"
+clap = { version = "3.0.0-beta.2", default-features = false, features = ["cargo", "color", "std", "suggestions"] }
 color-eyre = { version = "0.5.7", default-features = false, features = ["issue-url"] }
 dialoguer = "0.7.1"
 directories = "3.0.1"
@@ -24,12 +24,3 @@ opt-level = 3
 [[bin]]
 name = "git-drive"
 path = "src/main.rs"
-
-[profile.release]
-codegen-units = 1
-debug = false
-debug-assertions = false
-lto = true
-opt-level = 2
-rpath = false
-
