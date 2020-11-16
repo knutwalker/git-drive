@@ -28,19 +28,18 @@ git drive delete [user1 [user2...]]
 
 # List known aliases for the driver
 git drive me list
-git driver list
 
 # Edit driver, either prompted for, or specified
 git drive me edit [user1 [user2...]]
-git driver edit [user1 [user2...]]
 
 # Add new driver. Values not provided will be prompted
 git drive me new [[--as] user --name User --email Email]
-git driver add [[--as] user --name User --email Email]
 
 # Delets a driver, either prompted for, or specified
 git drive me delete [user1 [user2...]]
-git driver delete [user1 [user2...]]
+
+# Change identity while driving
+git drive as alias
 ```
 
 */
@@ -50,7 +49,8 @@ use color_eyre::{
     Result, Section, SectionExt,
 };
 use config::Config;
-use data::{Command, Driver, Id, Kind, Navigator, New, Provided};
+use data::{Action, Command, Driver, Id, Kind, Navigator, New, Provided};
+use dialoguer::{Input, MultiSelect, Select};
 use std::{
     fs::File,
     ops::Deref,
@@ -62,37 +62,46 @@ mod args;
 mod config;
 mod data;
 
-static APPLICATION: &str = env!("CARGO_PKG_NAME");
-
 fn main() -> Result<()> {
     install_eyre()?;
 
     let mut config = config::load()?;
     let command = args::command(&config);
 
-    eprintln!("config = {:#?}", config);
-    eprintln!("command = {:#?}", command);
-
-    let changed = match command {
-        Command::Drive(Provided(None)) => bail!("driving not yet implemented"),
-        Command::Drive(Provided(Some(ids))) => run_drive(ids, &config)?,
-        Command::List(kind) => run_list(kind, &config),
-        Command::New(kind, new) => run_new(kind, &mut config, new)?,
-        Command::Edit(kind, Provided(None), new) => run_edit(kind, &mut config, new)?,
-        Command::Edit(_, _, _) => bail!("prompting or multi edit not yet implemented"),
-        Command::Delete(kind, Provided(Some(ids))) => run_delete(kind, &mut config, ids),
-        Command::Delete(_, _) => bail!("prompting for deleted not yet implemented"),
+    let Command { kind, action } = command;
+    let changed = match action {
+        Action::Drive(Provided(None)) => select_drive(&config)?,
+        Action::Drive(Provided(Some(ids))) => run_drive(ids, &config)?,
+        Action::Change(Provided(None)) => bail!("Switching seats not yet implemented"),
+        Action::Change(Provided(Some(_))) => bail!("Switching seats not yet implemented"),
+        Action::List => run_list(kind, &config),
+        Action::New(new) => run_new(kind, &mut config, new)?,
+        Action::Edit(new) => run_edit(kind, &mut config, new)?,
+        Action::Delete(Provided(Some(ids))) => run_delete(kind, &mut config, ids),
+        Action::Delete(_) => select_delete(kind, &mut config)?,
     };
 
     if changed {
-        eprintln!("config = {:#?}", config);
         config::store(config)?;
     }
 
     Ok(())
 }
 
-fn run_drive(ids: Vec<Id>, config: &Config) -> Result<bool> {
+fn select_drive(config: &Config) -> Result<bool> {
+    let ids = select_ids_from(Kind::Navigator, config)?;
+    run_drive(ids, config)
+}
+
+fn select_delete(kind: Kind, config: &mut Config) -> Result<bool> {
+    let ids = select_ids_from(kind, config)?
+        .into_iter()
+        .cloned()
+        .collect();
+    Ok(run_delete(kind, config, ids))
+}
+
+fn run_drive<A: IdRef>(ids: Vec<A>, config: &Config) -> Result<bool> {
     if ids.is_empty() {
         return drive_alone();
     }
@@ -103,8 +112,8 @@ fn run_drive(ids: Vec<Id>, config: &Config) -> Result<bool> {
             config
                 .navigators
                 .iter()
-                .find(|n| id.same_as(n))
-                .ok_or_else(|| eyre!("No navigator found for `{}`", &*id))
+                .find(|n| id.id().same_as(n))
+                .ok_or_else(|| eyre!("No navigator found for `{}`", id.id().as_ref()))
         })
         .collect::<Result<Vec<_>>>()?;
 
@@ -186,114 +195,209 @@ fn run_list(kind: Kind, config: &Config) -> bool {
     false
 }
 
+fn complete_nav<'a, F, G>(new: New, valid: F, error_msg: &str, lookup: G) -> Result<Navigator>
+where
+    F: for<'x> Fn(&'x str) -> bool,
+    G: for<'x> Fn(&'x Id) -> Option<&'a Navigator>,
+{
+    let New {
+        id,
+        name,
+        email,
+        key: _,
+    } = new;
+
+    let alias = match id {
+        Some(id) => Id(id),
+        None => {
+            let input = Input::<String>::new()
+                .with_prompt("The alias?")
+                .validate_with(|input: &String| -> Result<(), String> {
+                    if valid(input.as_str()) {
+                        Ok(())
+                    } else {
+                        Err(format!("Alias {} {}", input, error_msg))
+                    }
+                })
+                .interact_text()?;
+            Id(input)
+        }
+    };
+
+    if !valid(&*alias) {
+        bail!("Alias {} {}", &*alias, error_msg);
+    }
+
+    let existing = lookup(&alias);
+
+    let mut input = Input::<String>::new();
+    input.with_prompt(format!("The name for [{}]", &*alias));
+    if let Some(name) = name {
+        input.with_initial_text(name);
+    } else if let Some(ex) = existing {
+        input.with_initial_text(ex.name.as_str());
+    }
+    let name = input.interact()?;
+
+    let mut input = Input::<String>::new();
+    input.with_prompt(format!("The email for [{}]", &*alias));
+    if let Some(email) = email {
+        input.with_initial_text(email);
+    } else if let Some(ex) = existing {
+        input.with_initial_text(ex.email.as_str());
+    }
+    let email = input.interact_text()?;
+
+    Ok(Navigator { alias, name, email })
+}
+
+fn complete_drv<'a, F, G>(mut new: New, valid: F, error_msg: &str, lookup: G) -> Result<Driver>
+where
+    F: for<'x> Fn(&'x str) -> bool,
+    G: for<'x> Fn(&'x Id) -> Option<&'a Driver>,
+{
+    let key = new.key.take();
+    let navigator = complete_nav(new, valid, error_msg, |id| lookup(id).map(|d| &d.navigator))?;
+
+    let existing = lookup(&navigator.alias);
+
+    let mut input = Input::<String>::new();
+    input.with_prompt(format!(
+        "The signing key for [{}]",
+        navigator.alias.as_ref()
+    ));
+    input.allow_empty(true);
+    if let Some(key) = key {
+        input.with_initial_text(key);
+    } else if let Some(key) = existing.and_then(|d| d.key.as_ref()) {
+        input.with_initial_text(key.as_str());
+    }
+    let key = input.interact_text()?;
+    let key = if key.is_empty() { None } else { Some(key) };
+
+    Ok(Driver { navigator, key })
+}
+
+fn complete_new_nav(new: New, config: &Config) -> Result<Navigator> {
+    complete_nav(
+        new,
+        |input| !config.navigators.iter().any(|n| n.alias.as_ref() == input),
+        "already exists",
+        |_| None,
+    )
+}
+
+fn complete_existing_nav(new: New, config: &Config) -> Result<Navigator> {
+    complete_nav(
+        new,
+        |input| config.navigators.iter().any(|n| n.alias.as_ref() == input),
+        "does not exist",
+        |id| config.navigators.iter().find(|n| id.same_as(n)),
+    )
+}
+
+fn complete_new_drv(new: New, config: &Config) -> Result<Driver> {
+    complete_drv(
+        new,
+        |input| !config.drivers.iter().any(|n| n.alias.as_ref() == input),
+        "already exists",
+        |_| None,
+    )
+}
+
+fn complete_existing_drv(new: New, config: &Config) -> Result<Driver> {
+    complete_drv(
+        new,
+        |input| config.drivers.iter().any(|n| n.alias.as_ref() == input),
+        "does not exist",
+        |id| config.drivers.iter().find(|d| id.same_as(*d)),
+    )
+}
+
 fn run_new(kind: Kind, config: &mut Config, new: New) -> Result<bool> {
-    match new {
-        New {
-            id: Some(id),
-            name: Some(name),
-            email: Some(email),
-            key,
-        } => {
-            let alias = Id(id);
-
-            match kind {
-                Kind::Navigator => {
-                    if config.navigators.iter().any(|n| alias.same_as(&n)) {
-                        bail!(
-                            "Alias {} already exists, use `{} edit` to change it ",
-                            &*alias,
-                            APPLICATION,
-                        );
-                    }
-                    let navigator = Navigator { alias, name, email };
-                    config.navigators.push(navigator);
-                }
-                Kind::Driver => {
-                    if config.drivers.iter().any(|d| alias.same_as(d)) {
-                        bail!(
-                            "Alias {} already exists, use `{} me edit` to change it ",
-                            &*alias,
-                            APPLICATION,
-                        );
-                    }
-                    let navigator = Navigator { alias, name, email };
-                    let driver = Driver { navigator, key };
-                    config.drivers.push(driver)
-                }
-            }
-            Ok(true)
+    match kind {
+        Kind::Navigator => {
+            let navigator = complete_new_nav(new, config)?;
+            config.navigators.push(navigator);
         }
-        _ => bail!("prompting not yet implemented"),
+        Kind::Driver => {
+            let driver = complete_new_drv(new, config)?;
+            config.drivers.push(driver);
+        }
     }
+    Ok(true)
 }
 
-fn run_edit(kind: Kind, config: &mut Config, new: New) -> Result<bool> {
-    match new {
-        New {
-            id: Some(id),
-            name,
-            email,
-            key,
-        } => {
-            let alias = Id(id);
-            // let navigator = Navigator { alias, name, email };
-            match kind {
-                Kind::Navigator => match config.navigators.iter_mut().find(|n| alias.same_as(n)) {
-                    Some(nav) => {
-                        if let Some(name) = name {
-                            nav.name = name;
-                        }
-                        if let Some(email) = email {
-                            nav.email = email;
-                        }
-                    }
-                    None => {
-                        bail!(
-                            "Alias {} does not exist, use `{} new` to add it ",
-                            &*alias,
-                            APPLICATION,
-                        );
-                    }
-                },
-                Kind::Driver => match config.drivers.iter_mut().find(|d| alias.same_as(&**d)) {
-                    Some(drv) => {
-                        if let Some(name) = name {
-                            drv.navigator.name = name;
-                        }
-                        if let Some(email) = email {
-                            drv.navigator.email = email;
-                        }
-                        if let Some(key) = key {
-                            drv.key = Some(key);
-                        }
-                    }
-                    None => {
-                        bail!(
-                            "Alias {} does not exist, use `{} me new` to add it ",
-                            &*alias,
-                            APPLICATION,
-                        );
-                    }
-                },
+fn run_edit(kind: Kind, config: &mut Config, mut new: New) -> Result<bool> {
+    if new.id.is_none() {
+        match kind {
+            Kind::Navigator => {
+                if config.navigators.is_empty() {
+                    bail!("No navigators to edit")
+                }
             }
-            Ok(true)
+            Kind::Driver => {
+                if config.drivers.is_empty() {
+                    bail!("No drivers to edit")
+                }
+            }
         }
-        _ => bail!("prompting not yet implemented"),
+        let mut ms = Select::new();
+        ms.with_prompt("Use [return] to select");
+        match kind {
+            Kind::Navigator => {
+                for nav in &config.navigators {
+                    ms.item(&*nav.alias);
+                }
+            }
+            Kind::Driver => {
+                for drv in &config.drivers {
+                    ms.item(&*drv.navigator.alias);
+                }
+            }
+        }
+        let chosen = ms.interact()?;
+        let id = match kind {
+            Kind::Navigator => &config.navigators[chosen],
+            Kind::Driver => &config.drivers[chosen].navigator,
+        };
+        new.id = Some(id.alias.as_ref().to_string());
     }
+    match kind {
+        Kind::Navigator => {
+            let navigator = complete_existing_nav(new, config)?;
+            let nav = config
+                .navigators
+                .iter_mut()
+                .find(|n| navigator.alias.same_as(n))
+                .expect("validated during complete_existing_nav");
+            *nav = navigator;
+        }
+        Kind::Driver => {
+            let driver = complete_existing_drv(new, config)?;
+            let drv = config
+                .drivers
+                .iter_mut()
+                .find(|d| driver.alias.same_as(&d.navigator))
+                .expect("validated during complete_existing_nav");
+            *drv = driver;
+        }
+    }
+    Ok(true)
 }
 
-fn run_delete(kind: Kind, config: &mut Config, ids: Vec<Id>) -> bool {
+fn run_delete<A: IdRef>(kind: Kind, config: &mut Config, ids: Vec<A>) -> bool {
     match kind {
         Kind::Navigator => do_delete(&mut config.navigators, ids),
         Kind::Driver => do_delete(&mut config.drivers, ids),
     }
 }
 
-fn do_delete<T: Deref<Target = Navigator>>(data: &mut Vec<T>, ids: Vec<Id>) -> bool {
+fn do_delete<A: IdRef, T: Deref<Target = Navigator>>(data: &mut Vec<T>, ids: Vec<A>) -> bool {
     let mut changed = false;
     let mut i = 0;
     while i != data.len() {
-        if ids.contains(&data[i].alias) {
+        if ids.iter().any(|id| id.id() == &data[i].alias) {
             let _ = data.remove(i);
             changed = true;
         } else {
@@ -307,6 +411,57 @@ fn print_nav(nav: &Navigator) {
     println!("{}: {} <{}>", &*nav.alias, nav.name, nav.email)
 }
 
+fn select_ids_from(kind: Kind, config: &Config) -> Result<Vec<&Id>> {
+    let selection = select_from(kind, config)?;
+    let ids = match kind {
+        Kind::Navigator => config
+            .navigators
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, nav)| {
+                if selection.contains(&idx) {
+                    Some(&nav.alias)
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        Kind::Driver => config
+            .drivers
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, drv)| {
+                if selection.contains(&idx) {
+                    Some(&drv.navigator.alias)
+                } else {
+                    None
+                }
+            })
+            .collect(),
+    };
+    Ok(ids)
+}
+
+fn select_from(kind: Kind, config: &Config) -> Result<Vec<usize>> {
+    let mut ms = MultiSelect::new();
+    ms.with_prompt("Use [space] to select, [return] to confirm");
+    match kind {
+        Kind::Navigator => {
+            for nav in &config.navigators {
+                ms.item(&*nav.alias);
+            }
+        }
+        Kind::Driver => {
+            for drv in &config.drivers {
+                ms.item(&*drv.navigator.alias);
+            }
+        }
+    }
+
+    let chosen = ms.interact()?;
+    Ok(chosen)
+}
+
 fn install_eyre() -> Result<()> {
     color_eyre::config::HookBuilder::default()
         .capture_span_trace_by_default(false)
@@ -318,4 +473,20 @@ fn install_eyre() -> Result<()> {
             color_eyre::ErrorKind::Recoverable(_) => true,
         })
         .install()
+}
+
+trait IdRef {
+    fn id(&self) -> &Id;
+}
+
+impl IdRef for Id {
+    fn id(&self) -> &Id {
+        self
+    }
+}
+
+impl IdRef for &Id {
+    fn id(&self) -> &Id {
+        self
+    }
 }

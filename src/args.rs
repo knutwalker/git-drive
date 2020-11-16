@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    data::{Command, Id, Kind, New, Provided},
+    data::{Action, Command, Id, Kind, New, Provided},
 };
 use clap::{
     App,
@@ -85,16 +85,6 @@ macro_rules! edit_app {
                 "(s), either prompted for, or specified"
             ))
         )
-        .arg(
-            Arg::new("EDIT")
-                .value_name("ID")
-                .about(concat!("Edit the specified ", $kind, "(s)"))
-                .required(false)
-                .last(true)
-                .multiple_values(true)
-                .min_values(1)
-                .possible_values(&$ids),
-        )
     };
 }
 
@@ -166,6 +156,18 @@ pub(crate) fn command(config: &Config) -> Command {
                 .subcommand(edit_app!("driver", drivers))
                 .subcommand(delete_app!("driver", drivers)),
         )
+        .subcommand(
+            App::new("as").about("Change driver seat").arg(
+                Arg::new("AS")
+                    .value_name("DRIVER")
+                    .about("Start driving as one of the specified drivers")
+                    .min_values(1)
+                    .max_values(1)
+                    .required(true)
+                    .multiple_values(false)
+                    .possible_values(&drivers),
+            ),
+        )
         .get_matches();
 
     fn ids(matches: &ArgMatches, var: &str, empty_is_none: bool) -> Provided {
@@ -199,26 +201,30 @@ pub(crate) fn command(config: &Config) -> Command {
     }
 
     let command = match args.subcommand() {
-        Some(("with", m)) => Command::Drive(ids(m, "WITH", false)),
-        Some(("alone", _)) => Command::Drive(Provided(Some(Vec::new()))),
-        Some(("list", m)) => Command::List(if m.subcommand_matches("me").is_none() {
-            Kind::Navigator
-        } else {
-            Kind::Driver
-        }),
-        Some(("new", m)) => Command::New(Kind::Navigator, new(m)),
-        Some(("edit", m)) => Command::Edit(Kind::Navigator, ids(m, "EDIT", true), new(m)),
-        Some(("delete", m)) => Command::Delete(Kind::Navigator, ids(m, "DELETE", true)),
+        Some(("with", m)) => Command::nav(Action::Drive(ids(m, "WITH", false))),
+        Some(("alone", _)) => Command::nav(Action::Drive(Provided(Some(Vec::new())))),
+        Some(("list", m)) => Command::new(
+            if m.subcommand_matches("me").is_none() {
+                Kind::Navigator
+            } else {
+                Kind::Driver
+            },
+            Action::List,
+        ),
+        Some(("new", m)) => Command::nav(Action::New(new(m))),
+        Some(("edit", m)) => Command::nav(Action::Edit(new(m))),
+        Some(("delete", m)) => Command::nav(Action::Delete(ids(m, "DELETE", true))),
         Some(("me", m)) => match m.subcommand() {
-            Some(("list", _)) => Command::List(Kind::Driver),
-            Some(("new", m)) => Command::New(Kind::Driver, new(m)),
-            Some(("edit", m)) => Command::Edit(Kind::Driver, ids(m, "EDIT", true), new(m)),
-            Some(("delete", m)) => Command::Delete(Kind::Driver, ids(m, "DELETE", true)),
+            Some(("list", _)) => Command::drv(Action::List),
+            Some(("new", m)) => Command::drv(Action::New(new(m))),
+            Some(("edit", m)) => Command::drv(Action::Edit(new(m))),
+            Some(("delete", m)) => Command::drv(Action::Delete(ids(m, "DELETE", true))),
             Some((c, _)) => invalid_sub(c),
             None => missing_sub(),
         },
+        Some(("as", m)) => Command::drv(Action::Change(ids(m, "AS", true))),
         Some((c, _)) => invalid_sub(c),
-        None => Command::Drive(Provided(None)),
+        None => Command::nav(Action::Drive(Provided(None))),
     };
 
     command
