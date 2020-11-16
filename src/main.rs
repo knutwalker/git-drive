@@ -14,13 +14,16 @@ git drive with user1 [user2...]
 # Start driving alone
 git drive alone
 
+# Show current navigators
+git drive show [--color[=<color>]]
+
 # List known navigators
 git drive list
 
 # Edit navigator(s), either prompted for, or specified
 git drive edit [user1 [user2...]]
 
-# Add new navigator. Values not provided will be prompted
+# Add new navigator, either prompted for, or specified
 git drive new [[--as] user --name User --email Email]
 
 # Delets navigator(s), either prompted for, or specified
@@ -32,8 +35,8 @@ git drive me list
 # Edit driver, either prompted for, or specified
 git drive me edit [user1 [user2...]]
 
-# Add new driver. Values not provided will be prompted
-git drive me new [[--as] user --name User --email Email]
+# Add new driver, either prompted for, or specified
+git drive me new [[--as] user --name User --email Email --key GPGSigningKey]
 
 # Delets a driver, either prompted for, or specified
 git drive me delete [user1 [user2...]]
