@@ -101,7 +101,7 @@ macro_rules! new_app {
     };
 }
 
-pub(crate) fn command(config: &Config) -> Command {
+pub(crate) fn app(config: &Config) -> App {
     let drivers = config
         .drivers
         .iter()
@@ -114,7 +114,7 @@ pub(crate) fn command(config: &Config) -> Command {
         .map(|s| s.alias.as_ref())
         .collect::<Vec<_>>();
 
-    let args = App::new(clap::crate_name!())
+    App::new(clap::crate_name!())
         .version(clap::crate_version!())
         .about(clap::crate_description!())
         .global_setting(ColoredHelp)
@@ -123,15 +123,17 @@ pub(crate) fn command(config: &Config) -> Command {
         .global_setting(InferSubcommands)
         .global_setting(VersionlessSubcommands)
         .subcommand(
-            App::new("with").arg(
-                Arg::new("WITH")
-                    .value_name("NAVIGATOR")
-                    .about("Start driving with the specified navigator(s)")
-                    .required(true)
-                    .multiple_values(true)
-                    .min_values(1)
-                    .possible_values(&navigators),
-            ),
+            App::new("with")
+                .about("Start driving with the specified navigator(s)")
+                .arg(
+                    Arg::new("WITH")
+                        .value_name("NAVIGATOR")
+                        .about("Start driving with the specified navigator(s)")
+                        .required(true)
+                        .multiple_values(true)
+                        .min_values(1)
+                        .possible_values(&navigators),
+                ),
         )
         .subcommand(App::new("alone").about("Start driving alone"))
         .subcommand(
@@ -182,7 +184,11 @@ pub(crate) fn command(config: &Config) -> Command {
                     .possible_values(&drivers),
             ),
         )
-        .get_matches();
+}
+
+pub(crate) fn command(config: &Config) -> Command {
+    let app = app(config);
+    let args = app.get_matches();
 
     fn ids(matches: &ArgMatches, var: &str, empty_is_none: bool) -> Provided {
         let ids = matches.values_of(var);

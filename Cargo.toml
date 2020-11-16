@@ -1,6 +1,6 @@
 [package]
 name = "git_drive"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Paul Horn <developer@knutwalker.de>"]
 description = "Support for switching git authors and co-authors"
 edition = "2018"

@@ -52,7 +52,7 @@ use color_eyre::{
     Result, Section, SectionExt,
 };
 use config::Config;
-use console::Style;
+use console::{style, Style};
 use data::{Action, Command, Driver, Id, Kind, Navigator, New, Provided};
 use dialoguer::{
     theme::{ColorfulTheme, Theme},
@@ -98,8 +98,31 @@ fn main() -> Result<()> {
 }
 
 fn select_drive(config: &Config) -> Result<bool> {
-    let ids = select_ids_from(Kind::Navigator, config)?;
-    run_drive(ids, config)
+    if config.navigators.is_empty() {
+        use std::fmt::Write;
+        let mut pre_help = String::with_capacity(128);
+        writeln!(pre_help, "{}", style("No navigators found").yellow())?;
+        writeln!(pre_help)?;
+        writeln!(
+            pre_help,
+            "You haven't added any navigators to the system yet."
+        )?;
+        writeln!(
+            pre_help,
+            "Please add a new navigator using `{}`",
+            style(concat!(env!("CARGO_PKG_NAME"), " new")).green()
+        )?;
+
+        let mut app = args::app(config).before_help(pre_help.as_str());
+        app.print_help()?;
+        return Ok(false);
+    }
+    let config = Config {
+        navigators: Vec::new(),
+        drivers: Vec::new(),
+    };
+    let ids = select_ids_from(Kind::Navigator, &config)?;
+    run_drive(ids, &config)
 }
 
 fn select_delete(kind: Kind, config: &mut Config) -> Result<bool> {
@@ -569,11 +592,17 @@ fn select_from(kind: Kind, config: &Config) -> Result<Vec<usize>> {
     ms.with_prompt("Use [space] to select, [return] to confirm");
     match kind {
         Kind::Navigator => {
+            if config.navigators.is_empty() {
+                return Ok(Vec::new());
+            }
             for nav in &config.navigators {
                 ms.item(&*nav.alias);
             }
         }
         Kind::Driver => {
+            if config.drivers.is_empty() {
+                return Ok(Vec::new());
+            }
             for drv in &config.drivers {
                 ms.item(&*drv.navigator.alias);
             }
