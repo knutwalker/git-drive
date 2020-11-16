@@ -109,7 +109,7 @@ fn select_drive(config: &Config) -> Result<bool> {
         )?;
         writeln!(
             pre_help,
-            "Please add a new navigator using `{}`",
+            "Please add a new navigator with {}",
             style(concat!(env!("CARGO_PKG_NAME"), " new")).green()
         )?;
 
@@ -191,7 +191,7 @@ fn drive_with<'a>(navigators: impl Iterator<Item = &'a Navigator>) -> Result<()>
         })
         .unzip();
 
-    let template_file = git_dir.join(concat!(".", env!("CARGO_PKG_NAME"), "_commit_template"));
+    let template_file = git_dir.join(concat!(env!("CARGO_PKG_NAME"), "_commit_template"));
     write_template(&template_file, co_authored_lines.into_iter())
         .with_section(|| format!("{}", template_file.display()).header("File:"))?;
 
@@ -200,6 +200,11 @@ fn drive_with<'a>(navigators: impl Iterator<Item = &'a Navigator>) -> Result<()>
     current_navigators_file.push(concat!(".", env!("CARGO_PKG_NAME"), "_current_navigators"));
     write_data(&current_navigators_file, navigators)
         .with_section(|| format!("{}", current_navigators_file.display()).header("File:"))?;
+    println!(
+        "git-commit set template to {}. Use {} to unset and drive alone.",
+        style(template_file.display()).cyan(),
+        style(concat!(env!("CARGO_PKG_NAME"), " alone")).yellow()
+    );
 
     let sc = Proc::new("git")
         .args(&["config", "commit.template"])
