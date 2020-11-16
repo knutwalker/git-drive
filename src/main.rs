@@ -117,12 +117,13 @@ fn select_drive(config: &Config) -> Result<bool> {
         app.print_help()?;
         return Ok(false);
     }
-    let ids = select_ids_from(Kind::Navigator, config)?;
+    let currently = get_current().unwrap_or_default();
+    let ids = select_ids_from(Kind::Navigator, config, currently)?;
     run_drive(ids, config)
 }
 
 fn select_delete(kind: Kind, config: &mut Config) -> Result<bool> {
-    let ids = select_ids_from(kind, config)?
+    let ids = select_ids_from(kind, config, Vec::new())?
         .into_iter()
         .cloned()
         .collect();
@@ -247,22 +248,30 @@ fn run_show(color: String) -> bool {
 }
 
 fn run_show_fallible(color: String) -> Result<()> {
+    let ids = get_current()?;
+    let style = Style::from_dotted_str(&color);
+    let s = ids
+        .into_iter()
+        .map(|id| format!("{} ", style.apply_to(&*id)))
+        .collect::<String>();
+
+    println!("{}", s.trim_end());
+    Ok(())
+}
+
+fn get_current() -> Result<Vec<Id>> {
     let mut current_navigators_file = git_dir()?;
     current_navigators_file.push(concat!(".", env!("CARGO_PKG_NAME"), "_current_navigators"));
 
     let data = read_data(&current_navigators_file)
         .with_section(|| format!("{}", current_navigators_file.display()).header("File:"))?;
 
-    let style = Style::from_dotted_str(&color);
-
-    let s = data
+    let ids = data
         .split(|b| *b == SEPARATOR)
-        .map(|s| String::from_utf8_lossy(s))
-        .map(|id| format!("{} ", style.apply_to(id)))
-        .collect::<String>();
+        .map(|s| Ok(Id(String::from_utf8(s.to_vec())?)))
+        .collect::<Result<Vec<_>>>()?;
 
-    println!("{}", s.trim_end());
-    Ok(())
+    Ok(ids)
 }
 
 fn git_dir() -> Result<PathBuf> {
@@ -556,8 +565,8 @@ fn print_nav(nav: &Navigator) {
     println!("{}: {} <{}>", &*nav.alias, nav.name, nav.email)
 }
 
-fn select_ids_from(kind: Kind, config: &Config) -> Result<Vec<&Id>> {
-    let selection = select_from(kind, config)?;
+fn select_ids_from(kind: Kind, config: &Config, pre_select: Vec<Id>) -> Result<Vec<&Id>> {
+    let selection = select_from(kind, config, pre_select)?;
     let ids = match kind {
         Kind::Navigator => config
             .navigators
@@ -587,7 +596,7 @@ fn select_ids_from(kind: Kind, config: &Config) -> Result<Vec<&Id>> {
     Ok(ids)
 }
 
-fn select_from(kind: Kind, config: &Config) -> Result<Vec<usize>> {
+fn select_from(kind: Kind, config: &Config, pre_select: Vec<Id>) -> Result<Vec<usize>> {
     let theme = ColorfulTheme::default();
     let mut ms = MultiSelect::with_theme(&theme);
     ms.with_prompt("Use [space] to select, [return] to confirm");
@@ -597,7 +606,7 @@ fn select_from(kind: Kind, config: &Config) -> Result<Vec<usize>> {
                 return Ok(Vec::new());
             }
             for nav in &config.navigators {
-                ms.item(&*nav.alias);
+                ms.item_checked(&*nav.alias, pre_select.contains(&nav.alias));
             }
         }
         Kind::Driver => {
@@ -605,7 +614,10 @@ fn select_from(kind: Kind, config: &Config) -> Result<Vec<usize>> {
                 return Ok(Vec::new());
             }
             for drv in &config.drivers {
-                ms.item(&*drv.navigator.alias);
+                ms.item_checked(
+                    &*drv.navigator.alias,
+                    pre_select.contains(&drv.navigator.alias),
+                );
             }
         }
     }
