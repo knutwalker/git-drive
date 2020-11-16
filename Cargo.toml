@@ -13,6 +13,7 @@ default-run = "git-drive"
 [dependencies]
 clap = { version = "3.0.0-beta.2", default-features = false, features = ["cargo", "color", "std", "suggestions"] }
 color-eyre = { version = "0.5.7", default-features = false, features = ["issue-url"] }
+console = "0.13.0"
 dialoguer = "0.7.1"
 directories = "3.0.1"
 serde = { version = "1.0.117", features = ["derive"] }

@@ -134,6 +134,20 @@ pub(crate) fn command(config: &Config) -> Command {
             ),
         )
         .subcommand(App::new("alone").about("Start driving alone"))
+        .subcommand(
+            App::new("show").about("Show current navigators").arg(
+                Arg::new("color")
+                    .short('c')
+                    .long("color")
+                    .visible_alias("colour")
+                    .default_value("none")
+                    .overrides_with("color")
+                    .min_values(0)
+                    .require_equals(true)
+                    .default_missing_value("cyan")
+                    .about("How to colorize each id"),
+            ),
+        )
         .subcommand(list_app!("navigator").subcommand(App::new("me")))
         .subcommand(new_app!("navigator"))
         .subcommand(edit_app!("navigator", navigators))
@@ -203,6 +217,9 @@ pub(crate) fn command(config: &Config) -> Command {
     let command = match args.subcommand() {
         Some(("with", m)) => Command::nav(Action::Drive(ids(m, "WITH", false))),
         Some(("alone", _)) => Command::nav(Action::Drive(Provided(Some(Vec::new())))),
+        Some(("show", m)) => Command::nav(Action::Show(String::from(
+            m.value_of("color").expect("has a default value"),
+        ))),
         Some(("list", m)) => Command::new(
             if m.subcommand_matches("me").is_none() {
                 Kind::Navigator

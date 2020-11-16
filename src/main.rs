@@ -49,10 +49,15 @@ use color_eyre::{
     Result, Section, SectionExt,
 };
 use config::Config;
+use console::Style;
 use data::{Action, Command, Driver, Id, Kind, Navigator, New, Provided};
-use dialoguer::{Input, MultiSelect, Select};
+use dialoguer::{
+    theme::{ColorfulTheme, Theme},
+    Input, MultiSelect, Select,
+};
 use std::{
     fs::File,
+    io::ErrorKind,
     ops::Deref,
     path::{Path, PathBuf},
     process::Command as Proc,
@@ -74,6 +79,7 @@ fn main() -> Result<()> {
         Action::Drive(Provided(Some(ids))) => run_drive(ids, &config)?,
         Action::Change(Provided(None)) => bail!("Switching seats not yet implemented"),
         Action::Change(Provided(Some(_))) => bail!("Switching seats not yet implemented"),
+        Action::Show(color) => run_show(color),
         Action::List => run_list(kind, &config),
         Action::New(new) => run_new(kind, &mut config, new)?,
         Action::Edit(new) => run_edit(kind, &mut config, new)?,
@@ -128,29 +134,50 @@ fn drive_alone() -> Result<bool> {
         .spawn()?
         .wait()?;
 
-    if !sc.success() {
-        std::process::exit(sc.code().unwrap_or_default())
+    match sc.code() {
+        Some(0) | Some(5) => {}
+        Some(c) => std::process::exit(c),
+        None => std::process::exit(127),
+    }
+
+    let git_dir = git_dir()?;
+    let mut current_navigators_file = git_dir;
+    current_navigators_file.push(concat!(".", env!("CARGO_PKG_NAME"), "_current_navigators"));
+
+    if let Err(e) = std::fs::remove_file(&current_navigators_file) {
+        if e.kind() != ErrorKind::NotFound {
+            return Err(eyre!(e).with_section(|| {
+                format!("{}", current_navigators_file.display()).header("File:")
+            }));
+        }
     }
 
     Ok(false)
 }
 
+/// U+001F - Information Separator One
+const SEPARATOR: u8 = 0x1F_u8;
+
 fn drive_with<'a>(navigators: impl Iterator<Item = &'a Navigator>) -> Result<()> {
-    let top_level = Proc::new("git")
-        .args(&["rev-parse", "--show-toplevel"])
-        .output()?;
-    assert!(top_level.status.success());
+    let git_dir = git_dir()?;
 
-    let top_level = top_level.stdout;
-    let top_level = String::from_utf8(top_level)?;
-    let mut template_file = PathBuf::from(top_level.trim());
-    template_file.push(".git");
-    template_file.push(concat!(".", env!("CARGO_PKG_NAME"), "_commit_template"));
+    let (co_authored_lines, navigators): (Vec<_>, Vec<_>) = navigators
+        .map(|n| {
+            let co_authored_line = format!("Co-Authored-By: {} <{}>", n.name, n.email);
+            let navigator = n.alias.as_bytes().to_vec();
+            (co_authored_line, navigator)
+        })
+        .unzip();
 
-    let templates = navigators.map(|n| format!("Co-Authored-By: {} <{}>", n.name, n.email));
-
-    write_template(&template_file, templates)
+    let template_file = git_dir.join(concat!(".", env!("CARGO_PKG_NAME"), "_commit_template"));
+    write_template(&template_file, co_authored_lines.into_iter())
         .with_section(|| format!("{}", template_file.display()).header("File:"))?;
+
+    let navigators = navigators.join([SEPARATOR].as_ref());
+    let mut current_navigators_file = git_dir;
+    current_navigators_file.push(concat!(".", env!("CARGO_PKG_NAME"), "_current_navigators"));
+    write_data(&current_navigators_file, navigators)
+        .with_section(|| format!("{}", current_navigators_file.display()).header("File:"))?;
 
     let sc = Proc::new("git")
         .args(&["config", "commit.template"])
@@ -179,6 +206,73 @@ fn write_template(file: &Path, data: impl Iterator<Item = String>) -> Result<()>
     Ok(())
 }
 
+fn write_data(file: &Path, data: Vec<u8>) -> Result<()> {
+    use std::io::Write;
+    let mut f = File::create(file)?;
+    f.write_all(&data)?;
+    f.flush()?;
+    Ok(())
+}
+
+fn run_show(color: String) -> bool {
+    let _ = run_show_fallible(color);
+    false
+}
+
+fn run_show_fallible(color: String) -> Result<()> {
+    let mut current_navigators_file = git_dir()?;
+    current_navigators_file.push(concat!(".", env!("CARGO_PKG_NAME"), "_current_navigators"));
+
+    let data = read_data(&current_navigators_file)
+        .with_section(|| format!("{}", current_navigators_file.display()).header("File:"))?;
+
+    let style = Style::from_dotted_str(&color);
+
+    let s = data
+        .split(|b| *b == SEPARATOR)
+        .map(|s| String::from_utf8_lossy(s))
+        .map(|id| format!("{} ", style.apply_to(id)))
+        .collect::<String>();
+
+    println!("{}", s.trim_end());
+    Ok(())
+}
+
+fn git_dir() -> Result<PathBuf> {
+    let git_dir = Proc::new("git")
+        .args(&["rev-parse", "--absolute-git-dir"])
+        .output()?;
+    if !git_dir.status.success() {
+        return Err(eyre!("Could not get current git dir")
+            .with_section(|| {
+                String::from_utf8_lossy(&git_dir.stdout[..])
+                    .into_owned()
+                    .header("Stderr:")
+            })
+            .with_suggestion(|| {
+                concat!(
+                    "Try calling ",
+                    env!("CARGO_PKG_NAME"),
+                    " from a working directory of a git repository."
+                )
+            }))?;
+    }
+
+    let git_dir = git_dir.stdout;
+    let git_dir = String::from_utf8(git_dir)?;
+    let git_dir = PathBuf::from(git_dir.trim());
+    Ok(git_dir)
+}
+
+fn read_data(file: &Path) -> Result<Vec<u8>> {
+    use std::io::Read;
+    let mut f = File::open(file)?;
+    let mut data = Vec::with_capacity(64);
+    let read = f.read_to_end(&mut data)?;
+    data.truncate(read);
+    Ok(data)
+}
+
 fn run_list(kind: Kind, config: &Config) -> bool {
     match kind {
         Kind::Navigator => {
@@ -195,7 +289,13 @@ fn run_list(kind: Kind, config: &Config) -> bool {
     false
 }
 
-fn complete_nav<'a, F, G>(new: New, valid: F, error_msg: &str, lookup: G) -> Result<Navigator>
+fn complete_nav<'a, F, G>(
+    new: New,
+    valid: F,
+    error_msg: &str,
+    lookup: G,
+    theme: &dyn Theme,
+) -> Result<Navigator>
 where
     F: for<'x> Fn(&'x str) -> bool,
     G: for<'x> Fn(&'x Id) -> Option<&'a Navigator>,
@@ -210,7 +310,7 @@ where
     let alias = match id {
         Some(id) => Id(id),
         None => {
-            let input = Input::<String>::new()
+            let input = Input::<String>::with_theme(theme)
                 .with_prompt("The alias?")
                 .validate_with(|input: &String| -> Result<(), String> {
                     if valid(input.as_str()) {
@@ -230,7 +330,7 @@ where
 
     let existing = lookup(&alias);
 
-    let mut input = Input::<String>::new();
+    let mut input = Input::<String>::with_theme(theme);
     input.with_prompt(format!("The name for [{}]", &*alias));
     if let Some(name) = name {
         input.with_initial_text(name);
@@ -239,7 +339,7 @@ where
     }
     let name = input.interact()?;
 
-    let mut input = Input::<String>::new();
+    let mut input = Input::<String>::with_theme(theme);
     input.with_prompt(format!("The email for [{}]", &*alias));
     if let Some(email) = email {
         input.with_initial_text(email);
@@ -251,13 +351,25 @@ where
     Ok(Navigator { alias, name, email })
 }
 
-fn complete_drv<'a, F, G>(mut new: New, valid: F, error_msg: &str, lookup: G) -> Result<Driver>
+fn complete_drv<'a, F, G>(
+    mut new: New,
+    valid: F,
+    error_msg: &str,
+    lookup: G,
+    theme: &dyn Theme,
+) -> Result<Driver>
 where
     F: for<'x> Fn(&'x str) -> bool,
     G: for<'x> Fn(&'x Id) -> Option<&'a Driver>,
 {
     let key = new.key.take();
-    let navigator = complete_nav(new, valid, error_msg, |id| lookup(id).map(|d| &d.navigator))?;
+    let navigator = complete_nav(
+        new,
+        valid,
+        error_msg,
+        |id| lookup(id).map(|d| &d.navigator),
+        theme,
+    )?;
 
     let existing = lookup(&navigator.alias);
 
@@ -278,50 +390,55 @@ where
     Ok(Driver { navigator, key })
 }
 
-fn complete_new_nav(new: New, config: &Config) -> Result<Navigator> {
+fn complete_new_nav(new: New, config: &Config, theme: &dyn Theme) -> Result<Navigator> {
     complete_nav(
         new,
         |input| !config.navigators.iter().any(|n| n.alias.as_ref() == input),
         "already exists",
         |_| None,
+        theme,
     )
 }
 
-fn complete_existing_nav(new: New, config: &Config) -> Result<Navigator> {
+fn complete_existing_nav(new: New, config: &Config, theme: &dyn Theme) -> Result<Navigator> {
     complete_nav(
         new,
         |input| config.navigators.iter().any(|n| n.alias.as_ref() == input),
         "does not exist",
         |id| config.navigators.iter().find(|n| id.same_as(n)),
+        theme,
     )
 }
 
-fn complete_new_drv(new: New, config: &Config) -> Result<Driver> {
+fn complete_new_drv(new: New, config: &Config, theme: &dyn Theme) -> Result<Driver> {
     complete_drv(
         new,
         |input| !config.drivers.iter().any(|n| n.alias.as_ref() == input),
         "already exists",
         |_| None,
+        theme,
     )
 }
 
-fn complete_existing_drv(new: New, config: &Config) -> Result<Driver> {
+fn complete_existing_drv(new: New, config: &Config, theme: &dyn Theme) -> Result<Driver> {
     complete_drv(
         new,
         |input| config.drivers.iter().any(|n| n.alias.as_ref() == input),
         "does not exist",
         |id| config.drivers.iter().find(|d| id.same_as(*d)),
+        theme,
     )
 }
 
 fn run_new(kind: Kind, config: &mut Config, new: New) -> Result<bool> {
+    let theme = ColorfulTheme::default();
     match kind {
         Kind::Navigator => {
-            let navigator = complete_new_nav(new, config)?;
+            let navigator = complete_new_nav(new, config, &theme)?;
             config.navigators.push(navigator);
         }
         Kind::Driver => {
-            let driver = complete_new_drv(new, config)?;
+            let driver = complete_new_drv(new, config, &theme)?;
             config.drivers.push(driver);
         }
     }
@@ -329,6 +446,7 @@ fn run_new(kind: Kind, config: &mut Config, new: New) -> Result<bool> {
 }
 
 fn run_edit(kind: Kind, config: &mut Config, mut new: New) -> Result<bool> {
+    let theme = ColorfulTheme::default();
     if new.id.is_none() {
         match kind {
             Kind::Navigator => {
@@ -342,7 +460,7 @@ fn run_edit(kind: Kind, config: &mut Config, mut new: New) -> Result<bool> {
                 }
             }
         }
-        let mut ms = Select::new();
+        let mut ms = Select::with_theme(&theme);
         ms.with_prompt("Use [return] to select");
         match kind {
             Kind::Navigator => {
@@ -365,7 +483,7 @@ fn run_edit(kind: Kind, config: &mut Config, mut new: New) -> Result<bool> {
     }
     match kind {
         Kind::Navigator => {
-            let navigator = complete_existing_nav(new, config)?;
+            let navigator = complete_existing_nav(new, config, &theme)?;
             let nav = config
                 .navigators
                 .iter_mut()
@@ -374,7 +492,7 @@ fn run_edit(kind: Kind, config: &mut Config, mut new: New) -> Result<bool> {
             *nav = navigator;
         }
         Kind::Driver => {
-            let driver = complete_existing_drv(new, config)?;
+            let driver = complete_existing_drv(new, config, &theme)?;
             let drv = config
                 .drivers
                 .iter_mut()
@@ -443,7 +561,8 @@ fn select_ids_from(kind: Kind, config: &Config) -> Result<Vec<&Id>> {
 }
 
 fn select_from(kind: Kind, config: &Config) -> Result<Vec<usize>> {
-    let mut ms = MultiSelect::new();
+    let theme = ColorfulTheme::default();
+    let mut ms = MultiSelect::with_theme(&theme);
     ms.with_prompt("Use [space] to select, [return] to confirm");
     match kind {
         Kind::Navigator => {
