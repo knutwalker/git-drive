@@ -61,7 +61,6 @@ use dialoguer::{
 use std::{
     fs::File,
     io::ErrorKind,
-    ops::Deref,
     path::{Path, PathBuf},
     process::Command as Proc,
 };
@@ -73,8 +72,8 @@ mod data;
 fn main() -> Result<()> {
     install_eyre()?;
 
+    let command = args::command();
     let mut config = config::load()?;
-    let command = args::command(&config);
 
     let Command { kind, action } = command;
     let changed = match action {
@@ -112,9 +111,11 @@ fn select_drive(config: &Config) -> Result<bool> {
             "Please add a new navigator with {}",
             style(concat!(env!("CARGO_PKG_NAME"), " new")).green()
         )?;
+        eprintln!("{}", pre_help);
+        eprintln!();
+        eprintln!();
+        args::print_help_stderr()?;
 
-        let mut app = args::app(config).before_help(pre_help.as_str());
-        app.print_help()?;
         return Ok(false);
     }
     let currently = get_current().unwrap_or_default();
@@ -141,7 +142,7 @@ fn run_drive<A: IdRef>(ids: Vec<A>, config: &Config) -> Result<bool> {
             config
                 .navigators
                 .iter()
-                .find(|n| id.id().same_as(n))
+                .find(|n| id.id().same_as_nav(n))
                 .ok_or_else(|| eyre!("No navigator found for `{}`", id.id().as_ref()))
         })
         .collect::<Result<Vec<_>>>()?;
@@ -441,7 +442,7 @@ fn complete_existing_nav(new: New, config: &Config, theme: &dyn Theme) -> Result
         new,
         |input| config.navigators.iter().any(|n| n.alias.as_ref() == input),
         "does not exist",
-        |id| config.navigators.iter().find(|n| id.same_as(n)),
+        |id| config.navigators.iter().find(|n| id.same_as_nav(n)),
         theme,
     )
 }
@@ -449,7 +450,12 @@ fn complete_existing_nav(new: New, config: &Config, theme: &dyn Theme) -> Result
 fn complete_new_drv(new: New, config: &Config, theme: &dyn Theme) -> Result<Driver> {
     complete_drv(
         new,
-        |input| !config.drivers.iter().any(|n| n.alias.as_ref() == input),
+        |input| {
+            !config
+                .drivers
+                .iter()
+                .any(|d| d.navigator.alias.as_ref() == input)
+        },
         "already exists",
         |_| None,
         theme,
@@ -459,9 +465,14 @@ fn complete_new_drv(new: New, config: &Config, theme: &dyn Theme) -> Result<Driv
 fn complete_existing_drv(new: New, config: &Config, theme: &dyn Theme) -> Result<Driver> {
     complete_drv(
         new,
-        |input| config.drivers.iter().any(|n| n.alias.as_ref() == input),
+        |input| {
+            config
+                .drivers
+                .iter()
+                .any(|d| d.navigator.alias.as_ref() == input)
+        },
         "does not exist",
-        |id| config.drivers.iter().find(|d| id.same_as(*d)),
+        |id| config.drivers.iter().find(|d| id.same_as_drv(d)),
         theme,
     )
 }
@@ -523,7 +534,7 @@ fn run_edit(kind: Kind, config: &mut Config, mut new: New) -> Result<bool> {
             let nav = config
                 .navigators
                 .iter_mut()
-                .find(|n| navigator.alias.same_as(n))
+                .find(|n| navigator.alias.same_as_nav(n))
                 .expect("validated during complete_existing_nav");
             *nav = navigator;
         }
@@ -532,7 +543,7 @@ fn run_edit(kind: Kind, config: &mut Config, mut new: New) -> Result<bool> {
             let drv = config
                 .drivers
                 .iter_mut()
-                .find(|d| driver.alias.same_as(&d.navigator))
+                .find(|d| driver.navigator.alias.same_as_drv(d))
                 .expect("validated during complete_existing_nav");
             *drv = driver;
         }
@@ -547,11 +558,11 @@ fn run_delete<A: IdRef>(kind: Kind, config: &mut Config, ids: Vec<A>) -> bool {
     }
 }
 
-fn do_delete<A: IdRef, T: Deref<Target = Navigator>>(data: &mut Vec<T>, ids: Vec<A>) -> bool {
+fn do_delete<A: IdRef, T: IdRef>(data: &mut Vec<T>, ids: Vec<A>) -> bool {
     let mut changed = false;
     let mut i = 0;
     while i != data.len() {
-        if ids.iter().any(|id| id.id() == &data[i].alias) {
+        if ids.iter().any(|id| id.id() == data[i].id()) {
             let _ = data.remove(i);
             changed = true;
         } else {
@@ -629,7 +640,6 @@ fn select_from(kind: Kind, config: &Config, pre_select: Vec<Id>) -> Result<Vec<u
 fn install_eyre() -> Result<()> {
     color_eyre::config::HookBuilder::default()
         .capture_span_trace_by_default(false)
-        .display_env_section(false)
         .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
         .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
         .issue_filter(|kind| match kind {
@@ -652,5 +662,17 @@ impl IdRef for Id {
 impl IdRef for &Id {
     fn id(&self) -> &Id {
         self
+    }
+}
+
+impl IdRef for Navigator {
+    fn id(&self) -> &Id {
+        &self.alias
+    }
+}
+
+impl IdRef for Driver {
+    fn id(&self) -> &Id {
+        &self.navigator.alias
     }
 }

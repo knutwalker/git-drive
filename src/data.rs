@@ -1,27 +1,29 @@
-use serde::{Deserialize, Serialize};
+use nanoserde::{DeJson, SerJson};
 use std::ops::Deref;
 
-#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
 #[repr(transparent)]
-#[serde(transparent)]
 pub struct Id(pub String);
 
 impl Id {
-    pub fn same_as(&self, other: &impl Deref<Target = Navigator>) -> bool {
-        self.as_ref() == Deref::deref(other).alias.as_ref()
+    pub fn same_as_nav(&self, other: &Navigator) -> bool {
+        self == &other.alias
+    }
+
+    pub fn same_as_drv(&self, other: &Driver) -> bool {
+        self == &other.navigator.alias
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, DeJson, SerJson)]
 pub struct Navigator {
     pub alias: Id,
     pub name: String,
     pub email: String,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default)]
 pub struct Driver {
-    #[serde(flatten)]
     pub navigator: Navigator,
     pub key: Option<String>,
 }
@@ -93,18 +95,64 @@ impl From<&str> for Id {
     }
 }
 
-impl Deref for Driver {
-    type Target = Navigator;
-
-    fn deref(&self) -> &Self::Target {
-        &self.navigator
+impl DeJson for Id {
+    fn de_json(
+        s: &mut nanoserde::DeJsonState,
+        i: &mut std::str::Chars,
+    ) -> Result<Self, nanoserde::DeJsonErr> {
+        Ok(Id(DeJson::de_json(s, i)?))
+    }
+}
+impl SerJson for Id {
+    fn ser_json(&self, d: usize, s: &mut nanoserde::SerJsonState) {
+        self.0.ser_json(d, s);
     }
 }
 
-impl Deref for Navigator {
-    type Target = Navigator;
+impl DeJson for Driver {
+    fn de_json(
+        s: &mut nanoserde::DeJsonState,
+        i: &mut std::str::Chars,
+    ) -> Result<Self, nanoserde::DeJsonErr> {
+        let flat: FlatDriver = DeJson::de_json(s, i)?;
+        Ok(flat.into())
+    }
+}
+impl SerJson for Driver {
+    fn ser_json(&self, d: usize, s: &mut nanoserde::SerJsonState) {
+        let flat: FlatDriver = Into::into(self);
+        flat.ser_json(d, s);
+    }
+}
 
-    fn deref(&self) -> &Self::Target {
-        self
+#[derive(DeJson, SerJson)]
+struct FlatDriver {
+    alias: Id,
+    name: String,
+    email: String,
+    key: Option<String>,
+}
+
+impl Into<FlatDriver> for &Driver {
+    fn into(self) -> FlatDriver {
+        FlatDriver {
+            alias: self.navigator.alias.clone(),
+            name: self.navigator.name.clone(),
+            email: self.navigator.email.clone(),
+            key: self.key.clone(),
+        }
+    }
+}
+
+impl Into<Driver> for FlatDriver {
+    fn into(self) -> Driver {
+        Driver {
+            navigator: Navigator {
+                alias: self.alias,
+                name: self.name,
+                email: self.email,
+            },
+            key: self.key,
+        }
     }
 }

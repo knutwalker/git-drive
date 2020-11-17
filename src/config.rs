@@ -1,9 +1,8 @@
 use crate::data::{Driver, Navigator};
 use color_eyre::{Help, Result, SectionExt};
 use directories::ProjectDirs;
-use serde::{Deserialize, Serialize};
+use nanoserde::{DeJson, SerJson};
 use std::{
-    convert::TryInto,
     fmt,
     fs::{self, File},
     io::{Error as IoError, ErrorKind, Read, Write},
@@ -13,7 +12,7 @@ use std::{
 static APPLICATION: &str = env!("CARGO_PKG_NAME");
 static CONFIG_FILE: &str = concat!(env!("CARGO_PKG_NAME"), "_config.json");
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, DeJson, SerJson)]
 pub struct Config {
     pub navigators: Vec<Navigator>,
     pub drivers: Vec<Driver>,
@@ -41,21 +40,13 @@ pub fn load() -> Result<Config> {
 fn load_from(file: &Path) -> Result<Config, Error> {
     match File::open(file) {
         Ok(mut cfg) => {
-            let meta = cfg.metadata().map_err(Error::FileReadError)?;
-            let size = meta.len();
-            let size: usize = size
-                .try_into()
-                .map_err(|_| {
-                    IoError::new(
-                        ErrorKind::Other,
-                        format!("The config file is too large: {} bytes", size),
-                    )
-                })
+            let size = file.metadata().map(|m| m.len() as usize + 1).unwrap_or(0);
+            let mut data = String::with_capacity(size);
+            let _ = cfg
+                .read_to_string(&mut data)
                 .map_err(Error::FileReadError)?;
-            let mut data = Vec::with_capacity(size);
-            let read = cfg.read_to_end(&mut data).map_err(Error::FileReadError)?;
-            let config = serde_json::from_slice(&data[..read]).map_err(Error::ConfigReadError)?;
-            Ok(config)
+            let cfg = DeJson::deserialize_json(&data).map_err(Error::ConfigReadError2)?;
+            Ok(cfg)
         }
         Err(e) => match e.kind() {
             ErrorKind::NotFound => Ok(Config::default()),
@@ -66,7 +57,8 @@ fn load_from(file: &Path) -> Result<Config, Error> {
 }
 
 pub fn store(config: Config) -> Result<()> {
-    let data = serde_json::to_vec_pretty(&config).map_err(Error::ConfigWriteError)?;
+    let data = SerJson::serialize_json(&config);
+    let data = data.into_bytes();
     let file = config_file().ok_or(Error::NoConfigDirectory)?;
     store_to(&file, data, true)
         .with_section(move || format!("{:?}", config).header("Config:"))
@@ -100,8 +92,7 @@ pub enum Error {
     NoConfigDirectory,
     FileReadError(std::io::Error),
     FileWriteError(std::io::Error),
-    ConfigReadError(serde_json::Error),
-    ConfigWriteError(serde_json::Error),
+    ConfigReadError2(nanoserde::DeJsonErr),
     IoError(std::io::Error),
 }
 
@@ -111,8 +102,7 @@ impl fmt::Display for Error {
             Error::NoConfigDirectory => write!(f, "The configuration directoy could not be found"),
             Error::FileReadError(_) => write!(f, "Could not read the configuration file"),
             Error::FileWriteError(_) => write!(f, "Could not write the configuration file"),
-            Error::ConfigReadError(_) => write!(f, "Could not read the configuration data"),
-            Error::ConfigWriteError(_) => write!(f, "Could not write the configuration data"),
+            Error::ConfigReadError2(_) => write!(f, "Could not read the configuration data"),
             Error::IoError(_) => write!(f, "IO error"),
         }
     }
@@ -123,8 +113,7 @@ impl std::error::Error for Error {
         match self {
             Error::FileReadError(e) => Some(e),
             Error::FileWriteError(e) => Some(e),
-            Error::ConfigReadError(e) => Some(e),
-            Error::ConfigWriteError(e) => Some(e),
+            Error::ConfigReadError2(e) => Some(e),
             Error::IoError(e) => Some(e),
             _ => None,
         }

@@ -11,16 +11,16 @@ default-run = "git-drive"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "3.0.0-beta.2", default-features = false, features = ["cargo", "color", "std", "suggestions"] }
-color-eyre = { version = "0.5.7", default-features = false, features = ["issue-url"] }
+color-eyre = { git = "https://github.com/knutwalker/color-eyre", branch = "no-backtrace", default-features = false, features = ["issue-url"] }
 console = "0.13.0"
 dialoguer = "0.7.1"
 directories = "3.0.1"
-serde = { version = "1.0.117", features = ["derive"] }
-serde_json = "1.0.59"
+nanoserde = "0.1.20"
+pico-args = "0.3.4"
 
-[profile.dev.package.backtrace]
-opt-level = 3
+[profile.release]
+lto = "thin"
+incremental = true
 
 [[bin]]
 name = "git-drive"
