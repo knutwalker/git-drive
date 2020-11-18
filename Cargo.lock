@@ -164,6 +164,7 @@ dependencies = [
  "dialoguer",
  "directories",
  "nanoserde",
+ "once_cell",
  "pico-args",
 ]
 

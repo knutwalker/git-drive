@@ -5,10 +5,8 @@ use crate::{
 };
 use color_eyre::eyre::eyre;
 use console::{style, Style, StyledObject};
-use dialoguer::{
-    theme::{ColorfulTheme as PrettyTheme, Theme},
-    Input, MultiSelect, Select, Validator,
-};
+use dialoguer::{theme::ColorfulTheme, theme::Theme, Input, MultiSelect, Select, Validator};
+use once_cell::sync::Lazy;
 use std::{cell::RefCell, fmt, marker::PhantomData};
 
 pub(crate) fn select_ids_from(
@@ -47,9 +45,11 @@ pub(crate) fn select_ids_from(
 }
 
 fn select_from(kind: Kind, config: &Config, pre_select: Vec<Id>) -> Result<Vec<usize>> {
-    let theme = PrettyTheme::default();
-    let mut ms = MultiSelect::with_theme(&theme);
-    ms.with_prompt("Use [space] to select, [return] to confirm");
+    let mut ms = MultiSelect::with_theme(&*THEME);
+    ms.with_prompt(format!(
+        "Select any number {}(s)\n  Use [space] to select, [return] to confirm",
+        kind
+    ));
     match kind {
         Kind::Navigator => {
             if config.navigators.is_empty() {
@@ -77,9 +77,11 @@ fn select_from(kind: Kind, config: &Config, pre_select: Vec<Id>) -> Result<Vec<u
 }
 
 pub(crate) fn select_id_from(kind: Kind, config: &Config) -> Result<Id> {
-    let theme = PrettyTheme::default();
-    let mut select = Select::with_theme(&theme);
-    select.with_prompt("Use [return] to select");
+    let mut select = Select::with_theme(&*THEME);
+    select.with_prompt(format!(
+        "Select one {}\n  Use arrows to select, [return] to confirm",
+        kind
+    ));
 
     match kind {
         Kind::Navigator => {
@@ -107,9 +109,8 @@ pub(crate) fn prompt_for_empty(
     id: &str,
     initial: Option<String>,
     allow_empty: bool,
-    theme: &dyn Theme,
 ) -> Result<String> {
-    let mut input = Input::<String>::with_theme(theme);
+    let mut input = Input::<String>::with_theme(&*THEME);
     input
         .with_prompt(format!("The {} for {}\n", thing, style(id).cyan()))
         .allow_empty(true)
@@ -121,40 +122,30 @@ pub(crate) fn prompt_for_empty(
     Ok(name)
 }
 
-pub(crate) fn prompt_for(
-    thing: &'static str,
-    id: &str,
-    initial: Option<String>,
-    theme: &dyn Theme,
-) -> Result<String> {
-    prompt_for_empty(thing, id, initial, false, theme)
+pub(crate) fn prompt_for(thing: &'static str, id: &str, initial: Option<String>) -> Result<String> {
+    prompt_for_empty(thing, id, initial, false)
 }
 
 pub(crate) fn complete_new_nav(new: New, config: &Config) -> Result<Navigator> {
-    let theme = PrettyTheme::default();
-    complete_nav(CheckMode::MustNotExist, new, config, &theme)
+    complete_nav(CheckMode::MustNotExist, new, config)
 }
 
 pub(crate) fn complete_existing_nav(new: New, config: &Config) -> Result<Navigator> {
-    let theme = PrettyTheme::default();
-    complete_nav(CheckMode::MustExist, new, config, &theme)
+    complete_nav(CheckMode::MustExist, new, config)
 }
 
 pub(crate) fn complete_new_drv(new: New, config: &Config) -> Result<Driver> {
-    let theme = PrettyTheme::default();
-    complete_drv(CheckMode::MustNotExist, new, config, &theme)
+    complete_drv(CheckMode::MustNotExist, new, config)
 }
 
 pub(crate) fn complete_existing_drv(new: New, config: &Config) -> Result<Driver> {
-    let theme = PrettyTheme::default();
-    complete_drv(CheckMode::MustExist, new, config, &theme)
+    complete_drv(CheckMode::MustExist, new, config)
 }
 
 fn prompt_alias<'a, T: Seat + Copy>(
     check: CheckMode,
     config: &'a Config,
     existing: Option<String>,
-    theme: &dyn Theme,
 ) -> Result<(Id, Option<&'a T::Entity>)> {
     let lookup = Lookup::<T>::new(config, check);
     let id = match existing {
@@ -163,8 +154,9 @@ fn prompt_alias<'a, T: Seat + Copy>(
             Id(id)
         }
         None => {
-            let input = Input::<String>::with_theme(theme)
+            let input = Input::<String>::with_theme(&*THEME)
             .with_prompt(format!("Please enter the alias for the {}.\n  The alias will be used as identifier for all other commands.\n", T::kind()))
+            .allow_empty(true)
             .validate_with(CheckForEmpty::new("alias", false))
             .validate_with(lookup)
             .interact_text()?;
@@ -176,12 +168,7 @@ fn prompt_alias<'a, T: Seat + Copy>(
     Ok((id, existing))
 }
 
-fn complete_nav(
-    check: CheckMode,
-    new: New,
-    config: &Config,
-    theme: &dyn Theme,
-) -> Result<Navigator> {
+fn complete_nav(check: CheckMode, new: New, config: &Config) -> Result<Navigator> {
     let New {
         id,
         name,
@@ -189,8 +176,8 @@ fn complete_nav(
         key: _,
     } = new;
 
-    let (alias, existing) = prompt_alias::<NavigatorSeat>(check, config, id, theme)?;
-    finish_nav(alias, name, email, existing, theme)
+    let (alias, existing) = prompt_alias::<NavigatorSeat>(check, config, id)?;
+    finish_nav(alias, name, email, existing)
 }
 
 fn finish_nav(
@@ -198,25 +185,22 @@ fn finish_nav(
     name: Option<String>,
     email: Option<String>,
     existing: Option<&Navigator>,
-    theme: &dyn Theme,
 ) -> Result<Navigator> {
     let name = prompt_for(
         "name",
         &*alias,
         name.or_else(|| existing.map(|n| n.name.clone())),
-        theme,
     )?;
     let email = prompt_for(
         "email",
         &*alias,
         email.or_else(|| existing.map(|n| n.email.clone())),
-        theme,
     )?;
 
     Ok(Navigator { alias, name, email })
 }
 
-fn complete_drv(check: CheckMode, new: New, config: &Config, theme: &dyn Theme) -> Result<Driver> {
+fn complete_drv(check: CheckMode, new: New, config: &Config) -> Result<Driver> {
     let New {
         id,
         name,
@@ -224,15 +208,14 @@ fn complete_drv(check: CheckMode, new: New, config: &Config, theme: &dyn Theme) 
         key,
     } = new;
 
-    let (alias, existing) = prompt_alias::<DriverSeat>(check, config, id, theme)?;
-    let navigator = finish_nav(alias, name, email, existing.map(|d| &d.navigator), theme)?;
+    let (alias, existing) = prompt_alias::<DriverSeat>(check, config, id)?;
+    let navigator = finish_nav(alias, name, email, existing.map(|d| &d.navigator))?;
 
     let key = prompt_for_empty(
         "signing key",
         &*navigator.alias,
         key.or_else(|| existing.and_then(|d| d.key.clone())),
         true,
-        theme,
     )?;
     let key = if key.is_empty() { None } else { Some(key) };
 
@@ -368,5 +351,183 @@ impl<T: Seat> Validator<String> for Lookup<'_, T> {
         }
 
         Ok(())
+    }
+}
+
+static THEME: Lazy<PrettyTheme> = Lazy::new(|| PrettyTheme {
+    theme: ColorfulTheme {
+        defaults_style: Style::new().for_stderr().cyan(),
+        prompt_style: Style::new().for_stderr().bold(),
+        prompt_prefix: style("?".to_string()).for_stderr().yellow(),
+        prompt_suffix: style("❯".to_string()).for_stderr().cyan(),
+        success_prefix: style("✔".to_string()).for_stderr().green(),
+        success_suffix: style(String::new()).for_stderr().green().dim(),
+        error_prefix: style("✘ ".to_string()).for_stderr().red(),
+        error_style: Style::new().for_stderr().red(),
+        hint_style: Style::new().for_stderr().cyan().dim(),
+        values_style: Style::new().for_stderr().green(),
+        active_item_style: Style::new().for_stderr().cyan(),
+        inactive_item_style: Style::new().for_stderr(),
+        active_item_prefix: style("❯".to_string()).for_stderr().cyan(),
+        inactive_item_prefix: style(" ".to_string()).for_stderr(),
+        checked_item_prefix: style("[✔]".to_string()).for_stderr().green(),
+        unchecked_item_prefix: style("[ ]".to_string()).for_stderr(),
+        picked_item_prefix: style(" ❯".to_string()).for_stderr().green(),
+        unpicked_item_prefix: style("  ".to_string()).for_stderr(),
+        inline_selections: true,
+    },
+    active_and_checked_item_prefix: style("[✔]".to_string()).for_stderr().cyan(),
+});
+
+struct PrettyTheme {
+    theme: ColorfulTheme,
+    active_and_checked_item_prefix: StyledObject<String>,
+}
+
+impl Theme for PrettyTheme {
+    fn format_prompt(&self, f: &mut dyn fmt::Write, prompt: &str) -> fmt::Result {
+        Theme::format_prompt(&self.theme, f, prompt)
+    }
+
+    fn format_error(&self, f: &mut dyn fmt::Write, err: &str) -> fmt::Result {
+        Theme::format_error(&self.theme, f, err)
+    }
+
+    fn format_confirm_prompt(
+        &self,
+        f: &mut dyn fmt::Write,
+        prompt: &str,
+        default: Option<bool>,
+    ) -> fmt::Result {
+        Theme::format_confirm_prompt(&self.theme, f, prompt, default)
+    }
+
+    fn format_confirm_prompt_selection(
+        &self,
+        f: &mut dyn fmt::Write,
+        prompt: &str,
+        selection: bool,
+    ) -> fmt::Result {
+        Theme::format_confirm_prompt_selection(&self.theme, f, prompt, selection)
+    }
+
+    fn format_input_prompt(
+        &self,
+        f: &mut dyn fmt::Write,
+        prompt: &str,
+        default: Option<&str>,
+    ) -> fmt::Result {
+        Theme::format_input_prompt(&self.theme, f, prompt, default)
+    }
+
+    fn format_input_prompt_selection(
+        &self,
+        f: &mut dyn fmt::Write,
+        prompt: &str,
+        sel: &str,
+    ) -> fmt::Result {
+        Theme::format_input_prompt_selection(&self.theme, f, prompt, sel)
+    }
+
+    fn format_password_prompt(&self, f: &mut dyn fmt::Write, prompt: &str) -> fmt::Result {
+        Theme::format_password_prompt(&self.theme, f, prompt)
+    }
+
+    fn format_password_prompt_selection(
+        &self,
+        f: &mut dyn fmt::Write,
+        prompt: &str,
+    ) -> fmt::Result {
+        Theme::format_password_prompt_selection(&self.theme, f, prompt)
+    }
+
+    fn format_select_prompt(&self, f: &mut dyn fmt::Write, prompt: &str) -> fmt::Result {
+        write!(f, "  {}", self.theme.prompt_style.apply_to(prompt))
+    }
+
+    fn format_select_prompt_selection(
+        &self,
+        f: &mut dyn fmt::Write,
+        prompt: &str,
+        sel: &str,
+    ) -> fmt::Result {
+        Theme::format_select_prompt_selection(&self.theme, f, prompt, sel)
+    }
+
+    fn format_multi_select_prompt(&self, f: &mut dyn fmt::Write, prompt: &str) -> fmt::Result {
+        write!(f, "  {}", self.theme.prompt_style.apply_to(prompt))
+    }
+
+    fn format_sort_prompt(&self, f: &mut dyn fmt::Write, prompt: &str) -> fmt::Result {
+        Theme::format_sort_prompt(&self.theme, f, prompt)
+    }
+
+    fn format_multi_select_prompt_selection(
+        &self,
+        f: &mut dyn fmt::Write,
+        prompt: &str,
+        selections: &[&str],
+    ) -> fmt::Result {
+        Theme::format_multi_select_prompt_selection(&self.theme, f, prompt, selections)
+    }
+
+    fn format_sort_prompt_selection(
+        &self,
+        f: &mut dyn fmt::Write,
+        prompt: &str,
+        selections: &[&str],
+    ) -> fmt::Result {
+        Theme::format_sort_prompt_selection(&self.theme, f, prompt, selections)
+    }
+
+    fn format_select_prompt_item(
+        &self,
+        f: &mut dyn fmt::Write,
+        text: &str,
+        active: bool,
+    ) -> fmt::Result {
+        Theme::format_select_prompt_item(&self.theme, f, text, active)
+    }
+
+    fn format_multi_select_prompt_item(
+        &self,
+        f: &mut dyn fmt::Write,
+        text: &str,
+        checked: bool,
+        active: bool,
+    ) -> fmt::Result {
+        let (active, checked, text) = match (active, checked) {
+            (true, true) => (
+                &self.theme.active_item_prefix,
+                &self.active_and_checked_item_prefix,
+                self.theme.active_item_style.apply_to(text),
+            ),
+            (true, false) => (
+                &self.theme.active_item_prefix,
+                &self.theme.unchecked_item_prefix,
+                self.theme.active_item_style.apply_to(text),
+            ),
+            (false, true) => (
+                &self.theme.inactive_item_prefix,
+                &self.theme.checked_item_prefix,
+                self.theme.values_style.apply_to(text),
+            ),
+            (false, false) => (
+                &self.theme.inactive_item_prefix,
+                &self.theme.unchecked_item_prefix,
+                self.theme.inactive_item_style.apply_to(text),
+            ),
+        };
+        write!(f, "{} {} {}", active, checked, text)
+    }
+
+    fn format_sort_prompt_item(
+        &self,
+        f: &mut dyn fmt::Write,
+        text: &str,
+        picked: bool,
+        active: bool,
+    ) -> fmt::Result {
+        Theme::format_sort_prompt_item(&self.theme, f, text, picked, active)
     }
 }
