@@ -1,5 +1,5 @@
 use nanoserde::{DeJson, SerJson};
-use std::ops::Deref;
+use std::{fmt, ops::Deref};
 
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
 #[repr(transparent)]
@@ -154,5 +154,42 @@ impl Into<Driver> for FlatDriver {
             },
             key: self.key,
         }
+    }
+}
+
+impl fmt::Display for Kind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Kind::Navigator => f.pad("navigator"),
+            Kind::Driver => f.pad("driver"),
+        }
+    }
+}
+
+pub trait IdRef {
+    fn id(&self) -> &Id;
+}
+
+impl IdRef for Id {
+    fn id(&self) -> &Id {
+        self
+    }
+}
+
+impl IdRef for &Id {
+    fn id(&self) -> &Id {
+        self
+    }
+}
+
+impl IdRef for Navigator {
+    fn id(&self) -> &Id {
+        &self.alias
+    }
+}
+
+impl IdRef for Driver {
+    fn id(&self) -> &Id {
+        &self.navigator.alias
     }
 }
