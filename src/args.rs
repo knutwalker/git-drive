@@ -243,7 +243,8 @@ impl ArgsErr {
             ArgsErr::DuplicateFlags(_, _) => 3,
             ArgsErr::EmptyWith => 4,
             ArgsErr::ParserErr(pico_args::Error::UnusedArgsLeft(_)) => 5,
-            ArgsErr::ParserErr(_) => 6,
+            ArgsErr::ParserErr(pico_args::Error::OptionWithoutAValue(_)) => 6,
+            ArgsErr::ParserErr(_) => 7,
         }
     }
 
@@ -301,6 +302,12 @@ impl std::fmt::Display for ArgsErr {
                 }
                 writeln!(f)
             }
+            ArgsErr::ParserErr(pico_args::Error::OptionWithoutAValue(arg)) => writeln!(
+                f,
+                "{error} The argument {arg} requires a value not non was supplied",
+                error = style("error:").red(),
+                arg = style(arg).yellow(),
+            ),
             ArgsErr::ParserErr(e) => writeln!(f, "{error} {}", e, error = style("error:").red()),
         }
     }
