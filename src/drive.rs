@@ -95,9 +95,23 @@ fn drive_with<'a>(navigators: impl Iterator<Item = &'a Navigator>) -> Result<()>
     write_data(&current_navigators_file, navigators)
         .with_section(|| format!("{}", current_navigators_file.display()).header("File:"))?;
     println!(
-        "git-commit set template to {}. Use {} to unset and drive alone.",
+        "git-commit set template to {}.",
         style(template_file.display()).cyan(),
-        style(concat!(env!("CARGO_PKG_NAME"), " alone")).yellow()
+    );
+
+    let prog = (|| {
+        let prog = std::env::args().next()?;
+        let prog = Path::new(prog.as_str());
+        let file = prog.file_name()?;
+        let file = file.to_str()?;
+        Some(file.to_string())
+    })()
+    .unwrap_or_else(|| String::from(env!("CARGO_PKG_NAME")));
+
+    println!(
+        "Use {} {} to unset and drive alone.",
+        style(prog).yellow(),
+        style("alone").yellow(),
     );
 
     let sc = Proc::new("git")
