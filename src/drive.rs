@@ -12,8 +12,14 @@ use std::{
     process::Command as Proc,
 };
 
-pub(crate) fn current(color: String) -> bool {
-    let _ = current_fallible(color);
+pub(crate) fn current(color: String, fail_if_empty: bool) -> bool {
+    let current = current_fallible(color);
+    if fail_if_empty {
+        if matches!(current, Ok(false) | Err(_)) {
+            std::process::exit(1);
+        }
+    }
+
     false
 }
 
@@ -149,16 +155,17 @@ fn write_data(file: &Path, data: Vec<u8>) -> Result<()> {
     Ok(())
 }
 
-fn current_fallible(color: String) -> Result<()> {
+fn current_fallible(color: String) -> Result<bool> {
     let ids = get_current()?;
     let style = Style::from_dotted_str(&color);
+    let has_current = !ids.is_empty();
     let s = ids
         .into_iter()
         .map(|id| format!("{} ", style.apply_to(&*id)))
         .collect::<String>();
 
     println!("{}", s.trim_end());
-    Ok(())
+    Ok(has_current)
 }
 
 fn get_current() -> Result<Vec<Id>> {

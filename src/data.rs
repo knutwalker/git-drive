@@ -68,7 +68,7 @@ impl Command {
 pub enum Action {
     Drive(Provided),
     Change(Provided),
-    Show(String),
+    Show(String, bool),
     List,
     New(New),
     Edit(New),

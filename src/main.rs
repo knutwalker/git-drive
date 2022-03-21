@@ -70,7 +70,7 @@ fn main() -> Result<()> {
         Action::Drive(Provided(Some(ids))) => drive::run(ids, &config)?,
         Action::Change(Provided(None)) => bail!("Switching seats not yet implemented"),
         Action::Change(Provided(Some(_))) => bail!("Switching seats not yet implemented"),
-        Action::Show(color) => drive::current(color),
+        Action::Show(color, fail) => drive::current(color, fail),
         Action::List => list::run(kind, &config),
         Action::New(new) => new::run(kind, &mut config, new)?,
         Action::Edit(new) => edit::run(kind, &mut config, new)?,

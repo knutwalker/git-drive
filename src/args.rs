@@ -109,7 +109,7 @@ fn parse_args() -> Result<Command, ArgsErr> {
                         Err(pico_args::Error::OptionWithoutAValue(_)) => String::from("cyan"),
                         Err(e) => return Err(e.into()),
                     };
-                    Command::nav(Action::Show(color))
+                    Command::nav(Action::Show(color, args.contains("--fail-if-empty")))
                 }
                 "l" | "list" => match args.subcommand()?.as_deref() {
                     None => Command::nav(Action::List),
