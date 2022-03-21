@@ -7,7 +7,7 @@ use color_eyre::eyre::eyre;
 use console::{style, Style, StyledObject};
 use dialoguer::{theme::ColorfulTheme, theme::Theme, Input, MultiSelect, Select, Validator};
 use once_cell::sync::Lazy;
-use std::{cell::RefCell, fmt, marker::PhantomData};
+use std::{fmt, marker::PhantomData};
 
 pub(crate) fn select_ids_from(
     kind: Kind,
@@ -142,12 +142,12 @@ pub(crate) fn complete_existing_drv(new: New, config: &Config) -> Result<Driver>
     complete_drv(CheckMode::MustExist, new, config)
 }
 
-fn prompt_alias<'a, T: Seat + Copy>(
+fn prompt_alias<T: Seat + Copy>(
     check: CheckMode,
-    config: &'a Config,
+    config: &Config,
     existing: Option<String>,
-) -> Result<(Id, Option<&'a T::Entity>)> {
-    let lookup = Lookup::<T>::new(config, check);
+) -> Result<(Id, Option<&'_ T::Entity>)> {
+    let mut lookup = Lookup::<T>::new(config, check);
     let id = match existing {
         Some(id) => {
             lookup.validate(&id)?;
@@ -222,13 +222,15 @@ fn complete_drv(check: CheckMode, new: New, config: &Config) -> Result<Driver> {
     Ok(Driver { navigator, key })
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 enum MsgTemplate {
     MustNotBeEmpty,
     EnterANonEmptyName,
 }
+
+#[derive(Copy, Clone, Debug)]
 struct CheckForEmpty {
-    messages: RefCell<Vec<MsgTemplate>>,
+    messages: [MsgTemplate; 2],
     entity: &'static str,
     allow_empty: bool,
 }
@@ -236,10 +238,7 @@ struct CheckForEmpty {
 impl CheckForEmpty {
     fn new(entity: &'static str, allow_empty: bool) -> Self {
         Self {
-            messages: RefCell::new(vec![
-                MsgTemplate::MustNotBeEmpty,
-                MsgTemplate::EnterANonEmptyName,
-            ]),
+            messages: [MsgTemplate::MustNotBeEmpty, MsgTemplate::EnterANonEmptyName],
             entity,
             allow_empty,
         }
@@ -249,13 +248,13 @@ impl CheckForEmpty {
 impl Validator<String> for CheckForEmpty {
     type Err = String;
 
-    fn validate(&self, input: &String) -> Result<(), Self::Err> {
+    fn validate(&mut self, input: &String) -> Result<(), Self::Err> {
         if self.allow_empty || !input.trim().is_empty() {
             return Ok(());
         }
-        let mut msg = self.messages.borrow_mut();
-        let tpl = msg[0];
-        msg.rotate_left(1);
+
+        let tpl = self.messages[0];
+        self.messages.rotate_left(1);
 
         let msg = match tpl {
             MsgTemplate::MustNotBeEmpty => format!("The {} must not be empty", self.entity),
@@ -327,14 +326,14 @@ impl<'a, T: Seat> Lookup<'a, T> {
     }
 
     fn matching_navigator(&self, id: &str) -> Option<&'a T::Entity> {
-        T::find(&self.config, id)
+        T::find(self.config, id)
     }
 }
 
 impl<T: Seat> Validator<String> for Lookup<'_, T> {
     type Err = color_eyre::eyre::Report;
 
-    fn validate(&self, input: &String) -> Result<(), Self::Err> {
+    fn validate(&mut self, input: &String) -> Result<(), Self::Err> {
         let input = input.as_str();
         let id_exists = self.matching_navigator(input).is_some();
         match self.check {
@@ -406,7 +405,7 @@ impl Theme for PrettyTheme {
         &self,
         f: &mut dyn fmt::Write,
         prompt: &str,
-        selection: bool,
+        selection: std::option::Option<bool>,
     ) -> fmt::Result {
         Theme::format_confirm_prompt_selection(&self.theme, f, prompt, selection)
     }

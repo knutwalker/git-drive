@@ -14,10 +14,8 @@ use std::{
 
 pub(crate) fn current(color: String, fail_if_empty: bool) -> bool {
     let current = current_fallible(color);
-    if fail_if_empty {
-        if matches!(current, Ok(false) | Err(_)) {
-            std::process::exit(1);
-        }
+    if fail_if_empty && matches!(current, Ok(false) | Err(_)) {
+        std::process::exit(1);
     }
 
     false
@@ -200,7 +198,7 @@ fn git_dir() -> Result<PathBuf> {
                     env!("CARGO_PKG_NAME"),
                     " from a working directory of a git repository."
                 )
-            }))?;
+            }));
     }
 
     let git_dir = git_dir.stdout;

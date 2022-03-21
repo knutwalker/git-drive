@@ -249,17 +249,14 @@ impl ArgsErr {
     }
 
     pub fn to_stderr(&self) -> bool {
-        match self {
-            ArgsErr::HelpRequested | ArgsErr::VersionRequested => false,
-            _ => true,
-        }
+        !matches!(self, ArgsErr::HelpRequested | ArgsErr::VersionRequested)
     }
 
     pub fn suggest_help(&self) -> bool {
-        match self {
-            ArgsErr::HelpRequested | ArgsErr::VersionRequested | ArgsErr::MissingCommand => false,
-            _ => true,
-        }
+        !matches!(
+            self,
+            ArgsErr::HelpRequested | ArgsErr::VersionRequested | ArgsErr::MissingCommand
+        )
     }
 }
 

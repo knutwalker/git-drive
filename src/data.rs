@@ -133,26 +133,26 @@ struct FlatDriver {
     key: Option<String>,
 }
 
-impl Into<FlatDriver> for &Driver {
-    fn into(self) -> FlatDriver {
+impl From<&Driver> for FlatDriver {
+    fn from(val: &Driver) -> Self {
         FlatDriver {
-            alias: self.navigator.alias.clone(),
-            name: self.navigator.name.clone(),
-            email: self.navigator.email.clone(),
-            key: self.key.clone(),
+            alias: val.navigator.alias.clone(),
+            name: val.navigator.name.clone(),
+            email: val.navigator.email.clone(),
+            key: val.key.clone(),
         }
     }
 }
 
-impl Into<Driver> for FlatDriver {
-    fn into(self) -> Driver {
+impl From<FlatDriver> for Driver {
+    fn from(val: FlatDriver) -> Self {
         Driver {
             navigator: Navigator {
-                alias: self.alias,
-                name: self.name,
-                email: self.email,
+                alias: val.alias,
+                name: val.name,
+                email: val.email,
             },
-            key: self.key,
+            key: val.key,
         }
     }
 }
