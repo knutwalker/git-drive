@@ -428,18 +428,6 @@ impl Theme for PrettyTheme {
         Theme::format_input_prompt_selection(&self.theme, f, prompt, sel)
     }
 
-    fn format_password_prompt(&self, f: &mut dyn fmt::Write, prompt: &str) -> fmt::Result {
-        Theme::format_password_prompt(&self.theme, f, prompt)
-    }
-
-    fn format_password_prompt_selection(
-        &self,
-        f: &mut dyn fmt::Write,
-        prompt: &str,
-    ) -> fmt::Result {
-        Theme::format_password_prompt_selection(&self.theme, f, prompt)
-    }
-
     fn format_select_prompt(&self, f: &mut dyn fmt::Write, prompt: &str) -> fmt::Result {
         write!(f, "  {}", self.theme.prompt_style.apply_to(prompt))
     }
