@@ -1,3 +1,5 @@
+#![allow(clippy::question_mark)]
+
 use nanoserde::{DeJson, SerJson};
 use std::{fmt, ops::Deref};
 
@@ -124,7 +126,6 @@ impl SerJson for Driver {
         flat.ser_json(d, s);
     }
 }
-
 #[derive(DeJson, SerJson)]
 struct FlatDriver {
     alias: Id,

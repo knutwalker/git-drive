@@ -46,6 +46,7 @@ git drive as alias
 ```
 
 */
+#![warn(unused_crate_dependencies)]
 
 use color_eyre::{eyre::bail, Result};
 use config::Config;
