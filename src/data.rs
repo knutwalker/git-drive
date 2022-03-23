@@ -1,7 +1,7 @@
 #![allow(clippy::question_mark)]
 
 use nanoserde::{DeJson, SerJson};
-use std::{fmt, ops::Deref};
+use std::{borrow::Borrow, fmt, ops::Deref};
 
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
 #[repr(transparent)]
@@ -192,5 +192,11 @@ impl IdRef for Navigator {
 impl IdRef for Driver {
     fn id(&self) -> &Id {
         &self.navigator.alias
+    }
+}
+
+impl Borrow<str> for &Navigator {
+    fn borrow(&self) -> &str {
+        &self.alias
     }
 }

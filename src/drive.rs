@@ -6,6 +6,7 @@ use crate::{
 use color_eyre::{eyre::eyre, Result, Section, SectionExt};
 use console::{style, Style};
 use std::{
+    borrow::Borrow,
     fs::File,
     io::ErrorKind,
     path::{Path, PathBuf},
@@ -34,18 +35,84 @@ pub(crate) fn run<A: IdRef>(ids: Vec<A>, config: &Config) -> Result<bool> {
 
     let navigators = ids
         .into_iter()
-        .map(|id| {
-            config
-                .navigators
-                .iter()
-                .find(|n| id.id().same_as_nav(n))
-                .ok_or_else(|| eyre!("No navigator found for `{}`", id.id().as_ref()))
-        })
+        .map(|id| match_navigator(id.id(), config))
         .collect::<Result<Vec<_>>>()?;
 
     drive_with(navigators.into_iter())?;
 
     Ok(false)
+}
+
+fn match_navigator<'config>(query: &Id, config: &'config Config) -> Result<&'config Navigator> {
+    let direct_matches = config.navigators.iter().filter(|n| query.same_as_nav(n));
+    if let Some(direct) = validate_matches(query, direct_matches) {
+        return direct;
+    }
+    let partial_matches = config
+        .navigators
+        .iter()
+        .filter(|n| match_caseless(&*query, n.borrow()));
+    if let Some(direct) = validate_matches(query, partial_matches) {
+        return direct;
+    }
+
+    Err(eyre!("No navigator found for `{}`", query.id().as_ref()))
+}
+
+fn validate_matches<'config>(
+    query: &Id,
+    mut matches: impl Iterator<Item = &'config Navigator>,
+) -> Option<Result<&'config Navigator>> {
+    if let Some(direct) = matches.next() {
+        let conflicting = matches.collect::<Vec<_>>();
+        Some(if conflicting.is_empty() {
+            Ok(direct)
+        } else {
+            Err(eyre!(
+                "The query `{}` is ambiguous, possible candidates: [{}, {}]",
+                query.as_ref(),
+                direct.id().as_ref(),
+                conflicting.join(", ")
+            ))
+        })
+    } else {
+        None
+    }
+}
+
+fn match_caseless(query: &str, navigator: &str) -> bool {
+    use caseless::Caseless;
+    use unicode_normalization::UnicodeNormalization;
+
+    fn iter_starts_with<L: Iterator<Item = char>, R: Iterator<Item = char>>(
+        mut a: L,
+        mut b: R,
+    ) -> bool {
+        loop {
+            match (a.next(), b.next()) {
+                (_, None) => return true,
+                (None, _) => return false,
+                (Some(x), Some(y)) => {
+                    if !x.eq(&y) {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+
+    iter_starts_with(
+        navigator
+            .chars()
+            .nfd()
+            .default_case_fold()
+            .filter(char::is_ascii),
+        query
+            .chars()
+            .nfd()
+            .default_case_fold()
+            .filter(char::is_ascii),
+    )
 }
 
 fn drive_alone() -> Result<bool> {
