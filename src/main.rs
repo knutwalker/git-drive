@@ -48,10 +48,10 @@ git drive as alias
 */
 #![warn(unused_crate_dependencies)]
 
-use color_eyre::{eyre::bail, Result};
 use config::Config;
 use console::style;
 use data::{Action, Command, Provided};
+use eyre::{bail, Result};
 
 mod args;
 mod config;
@@ -60,8 +60,6 @@ mod drive;
 mod io;
 
 fn main() -> Result<()> {
-    install_eyre()?;
-
     let command = args::command();
     let mut config = config::load()?;
 
@@ -166,7 +164,7 @@ mod edit {
         data::{Kind, New},
         io, Result,
     };
-    use color_eyre::eyre::bail;
+    use eyre::bail;
 
     pub(crate) fn run(kind: Kind, config: &mut Config, mut new: New) -> Result<bool> {
         if new.id.is_none() {
@@ -244,16 +242,4 @@ mod delete {
         }
         changed
     }
-}
-
-fn install_eyre() -> Result<()> {
-    color_eyre::config::HookBuilder::default()
-        .capture_span_trace_by_default(false)
-        .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
-        .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
-        .issue_filter(|kind| match kind {
-            color_eyre::ErrorKind::NonRecoverable(_) => false,
-            color_eyre::ErrorKind::Recoverable(_) => true,
-        })
-        .install()
 }

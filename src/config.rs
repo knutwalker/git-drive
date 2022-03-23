@@ -1,6 +1,9 @@
-use crate::data::{Driver, Navigator};
-use color_eyre::{Help, Result, SectionExt};
+use crate::{
+    data::{Driver, Navigator},
+    Result,
+};
 use directories::ProjectDirs;
+use eyre::WrapErr;
 use nanoserde::{DeJson, SerJson};
 use std::{
     fmt,
@@ -30,11 +33,15 @@ pub fn load() -> Result<Config> {
         Some(file) => file,
         None => return Ok(Config::default()),
     };
-    load_from(&file)
-        .with_section(move || format!("{}", file.display()).header("File:"))
-        .with_suggestion(|| {
-            "Make sure that the config file is accessible and is properly formatted"
-        })
+    load_from(&file).wrap_err_with(|| {
+        format!(
+            concat!(
+                "The file `{}` could not be read.\n",
+                "Please make sure that the config file is accessible and is properly formatted.",
+            ),
+            file.display()
+        )
+    })
 }
 
 fn load_from(file: &Path) -> Result<Config, Error> {
@@ -58,10 +65,17 @@ pub fn store(config: Config) -> Result<()> {
     let data = SerJson::serialize_json(&config);
     let data = data.into_bytes();
     let file = config_file().ok_or(Error::NoConfigDirectory)?;
-    store_to(&file, data, true)
-        .with_section(move || format!("{:?}", config).header("Config:"))
-        .with_section(move || format!("{}", file.display()).header("File:"))
-        .with_suggestion(|| "Make sure that the config file is accessible and writable")
+    store_to(&file, data, true).wrap_err_with(|| {
+        format!(
+            concat!(
+                "The file `{}` could not be written.\n",
+                "Please make sure that the config file is accessible and writable.\n",
+                "Config: {:?}"
+            ),
+            file.display(),
+            config
+        )
+    })
 }
 
 fn store_to(file: &Path, data: Vec<u8>, create_parent: bool) -> Result<(), Error> {

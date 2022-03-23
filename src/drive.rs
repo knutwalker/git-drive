@@ -1,10 +1,10 @@
 use crate::{
     config::Config,
     data::{Id, IdRef, Kind, Navigator},
-    io,
+    io, Result,
 };
-use color_eyre::{eyre::eyre, Result, Section, SectionExt};
 use console::{style, Style};
+use eyre::{eyre, WrapErr};
 use std::{
     borrow::Borrow,
     fs::File,
@@ -133,9 +133,7 @@ fn drive_alone() -> Result<bool> {
 
     if let Err(e) = std::fs::remove_file(&current_navigators_file) {
         if e.kind() != ErrorKind::NotFound {
-            return Err(eyre!(e).with_section(|| {
-                format!("{}", current_navigators_file.display()).header("File:")
-            }));
+            return Err(eyre!(e).wrap_err(format!("File: {}", current_navigators_file.display())));
         }
     }
 
@@ -158,13 +156,13 @@ fn drive_with<'a>(navigators: impl Iterator<Item = &'a Navigator>) -> Result<()>
 
     let template_file = git_dir.join(concat!(env!("CARGO_PKG_NAME"), "_commit_template"));
     write_template(&template_file, co_authored_lines.into_iter())
-        .with_section(|| format!("{}", template_file.display()).header("File:"))?;
+        .wrap_err_with(|| format!("File: {}", template_file.display()))?;
 
     let navigators = navigators.join([SEPARATOR].as_ref());
     let mut current_navigators_file = git_dir;
     current_navigators_file.push(concat!(".", env!("CARGO_PKG_NAME"), "_current_navigators"));
     write_data(&current_navigators_file, navigators)
-        .with_section(|| format!("{}", current_navigators_file.display()).header("File:"))?;
+        .wrap_err_with(|| format!("File: {}", current_navigators_file.display()))?;
     println!(
         "git-commit set template to {}.",
         style(template_file.display()).cyan(),
@@ -238,7 +236,7 @@ fn get_current() -> Result<Vec<Id>> {
     current_navigators_file.push(concat!(".", env!("CARGO_PKG_NAME"), "_current_navigators"));
 
     let data = read_data(&current_navigators_file)
-        .with_section(|| format!("{}", current_navigators_file.display()).header("File:"))?;
+        .wrap_err_with(|| format!("File: {}", current_navigators_file.display()))?;
 
     let ids = data
         .split(|b| *b == SEPARATOR)
@@ -253,19 +251,17 @@ fn git_dir() -> Result<PathBuf> {
         .args(&["rev-parse", "--absolute-git-dir"])
         .output()?;
     if !git_dir.status.success() {
-        return Err(eyre!("Could not get current git dir")
-            .with_section(|| {
-                String::from_utf8_lossy(&git_dir.stdout[..])
-                    .into_owned()
-                    .header("Stderr:")
-            })
-            .with_suggestion(|| {
-                concat!(
-                    "Try calling ",
-                    env!("CARGO_PKG_NAME"),
-                    " from a working directory of a git repository."
-                )
-            }));
+        return Err(eyre!(
+            concat!(
+                "Could not get current git dir\n",
+                "Stderr: {}\n",
+                "\n",
+                "Try calling ",
+                env!("CARGO_PKG_NAME"),
+                " from a working directory of a git repository."
+            ),
+            String::from_utf8_lossy(&git_dir.stdout[..])
+        ));
     }
 
     let git_dir = git_dir.stdout;

@@ -3,9 +3,9 @@ use crate::{
     data::{Driver, Id, Kind, Navigator, New},
     Result,
 };
-use color_eyre::eyre::eyre;
 use console::{style, Style, StyledObject};
 use dialoguer::{theme::ColorfulTheme, theme::Theme, Input, MultiSelect, Select, Validator};
+use eyre::eyre;
 use once_cell::sync::Lazy;
 use std::{fmt, marker::PhantomData};
 
@@ -331,7 +331,7 @@ impl<'a, T: Seat> Lookup<'a, T> {
 }
 
 impl<T: Seat> Validator<String> for Lookup<'_, T> {
-    type Err = color_eyre::eyre::Report;
+    type Err = eyre::Report;
 
     fn validate(&mut self, input: &String) -> Result<(), Self::Err> {
         let input = input.as_str();
