@@ -16,7 +16,7 @@ caseless = "0.2.1"
 console = "0.15.0"
 dialoguer = { version = "0.10.0", default-features = false }
 directories = "4.0.1"
-eyre = "0.6.7"
+eyre = "0.6.8"
 nanoserde = "0.1.29"
 once_cell = "1.10.0"
 unicode-normalization = "0.1.19"
