@@ -14,7 +14,7 @@ publish = false
 [dependencies]
 caseless = "0.2.1"
 console = "0.15.0"
-dialoguer = { version = "0.10.0", default-features = false }
+dialoguer = { version = "0.10.2", default-features = false }
 directories = "4.0.1"
 eyre = "0.6.7"
 nanoserde = "0.1.29"
