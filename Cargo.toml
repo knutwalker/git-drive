@@ -18,7 +18,7 @@ dialoguer = { version = "0.10.0", default-features = false }
 directories = "4.0.1"
 eyre = "0.6.7"
 nanoserde = "0.1.29"
-once_cell = "1.10.0"
+once_cell = "1.15.0"
 unicode-normalization = "0.1.19"
 
 [dependencies.clap]
