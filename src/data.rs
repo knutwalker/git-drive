@@ -35,46 +35,40 @@ pub enum Kind {
     Navigator,
     Driver,
 }
-#[derive(Debug)]
-pub struct Provided(pub Option<Vec<Id>>);
 
 #[derive(Debug)]
-pub struct New {
+pub struct PartialNav {
     pub id: Option<String>,
     pub name: Option<String>,
     pub email: Option<String>,
     pub key: Option<String>,
 }
 
-#[derive(Debug)]
-pub struct Command {
-    pub kind: Kind,
-    pub action: Action,
-}
-
-impl Command {
-    pub fn new(kind: Kind, action: Action) -> Self {
-        Self { kind, action }
-    }
-
-    pub fn nav(action: Action) -> Self {
-        Self::new(Kind::Navigator, action)
-    }
-
-    pub fn drv(action: Action) -> Self {
-        Self::new(Kind::Driver, action)
-    }
+#[derive(Clone, Debug)]
+pub struct ShowNav {
+    pub color: String,
+    pub fail_if_empty: bool,
 }
 
 #[derive(Debug)]
 pub enum Action {
-    Drive(Provided),
-    Change(Provided),
-    Show(String, bool),
-    List,
-    New(New),
-    Edit(New),
-    Delete(Provided),
+    DriveFromSelection,
+    DriveWith(Vec<Id>),
+    DriveAlone,
+    ListNavigators,
+    ListDrivers,
+    ShowCurrentNavigator(ShowNav),
+    NewNavigator(PartialNav),
+    EditNavigator(PartialNav),
+    DeleteNavigatorFromSelection,
+    DeleteNavigators(Vec<Id>),
+
+    DriveAsFromSelection,
+    DriveAs(Id),
+    NewDriver(PartialNav),
+    EditDriver(PartialNav),
+    DeleteDriverFromSelection,
+    DeleteDrivers(Vec<Id>),
 }
 
 impl Deref for Id {

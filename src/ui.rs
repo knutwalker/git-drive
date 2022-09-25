@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    data::{Driver, Id, Kind, Navigator, New},
+    data::{Driver, Id, Kind, Navigator, PartialNav},
     Result,
 };
 use console::{style, Style, StyledObject};
@@ -126,20 +126,20 @@ pub(crate) fn prompt_for(thing: &'static str, id: &str, initial: Option<String>)
     prompt_for_empty(thing, id, initial, false)
 }
 
-pub(crate) fn complete_new_nav(new: New, config: &Config) -> Result<Navigator> {
-    complete_nav(CheckMode::MustNotExist, new, config)
+pub(crate) fn complete_new_nav(partial: PartialNav, config: &Config) -> Result<Navigator> {
+    complete_nav(CheckMode::MustNotExist, partial, config)
 }
 
-pub(crate) fn complete_existing_nav(new: New, config: &Config) -> Result<Navigator> {
-    complete_nav(CheckMode::MustExist, new, config)
+pub(crate) fn complete_existing_nav(partial: PartialNav, config: &Config) -> Result<Navigator> {
+    complete_nav(CheckMode::MustExist, partial, config)
 }
 
-pub(crate) fn complete_new_drv(new: New, config: &Config) -> Result<Driver> {
-    complete_drv(CheckMode::MustNotExist, new, config)
+pub(crate) fn complete_new_drv(partial: PartialNav, config: &Config) -> Result<Driver> {
+    complete_drv(CheckMode::MustNotExist, partial, config)
 }
 
-pub(crate) fn complete_existing_drv(new: New, config: &Config) -> Result<Driver> {
-    complete_drv(CheckMode::MustExist, new, config)
+pub(crate) fn complete_existing_drv(partial: PartialNav, config: &Config) -> Result<Driver> {
+    complete_drv(CheckMode::MustExist, partial, config)
 }
 
 fn prompt_alias<T: Seat + Copy>(
@@ -168,8 +168,8 @@ fn prompt_alias<T: Seat + Copy>(
     Ok((id, existing))
 }
 
-fn complete_nav(check: CheckMode, new: New, config: &Config) -> Result<Navigator> {
-    let New {
+fn complete_nav(check: CheckMode, new: PartialNav, config: &Config) -> Result<Navigator> {
+    let PartialNav {
         id,
         name,
         email,
@@ -200,8 +200,8 @@ fn finish_nav(
     Ok(Navigator { alias, name, email })
 }
 
-fn complete_drv(check: CheckMode, new: New, config: &Config) -> Result<Driver> {
-    let New {
+fn complete_drv(check: CheckMode, new: PartialNav, config: &Config) -> Result<Driver> {
+    let PartialNav {
         id,
         name,
         email,

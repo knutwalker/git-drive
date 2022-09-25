@@ -1,5 +1,7 @@
+use std::convert::TryInto;
+
 use crate::{
-    data::{Action, Command, Id, New, Provided},
+    data::{Action, Id, PartialNav, ShowNav},
     Result,
 };
 use clap::{AppSettings::DeriveDisplayOrder, Args, IntoApp, Parser, Subcommand};
@@ -11,19 +13,37 @@ pub(crate) fn print_help_stderr() -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn command() -> Command {
+pub(crate) fn action() -> Action {
     parse_args()
 }
 
-fn parse_args() -> Command {
+fn parse_args() -> Action {
     let args = AppArgs::parse();
     match args.cmd {
-        None => Command::nav(Action::Drive(Provided(None))),
+        None => Action::DriveFromSelection,
         Some(cmd) => match cmd {
-            NavigatorCommand::With { ids } => Command::nav(Action::Drive(ids.into())),
-            NavigatorCommand::Delete { ids } => Command::nav(Action::Delete(ids.into())),
-            NavigatorCommand::As { ids } => Command::drv(Action::Change(ids.into())),
-            NavigatorCommand::Alone => Command::nav(Action::Drive(Provided(Some(Vec::new())))),
+            NavigatorCommand::With { ids } => fold_map_items(
+                ids,
+                Id,
+                Action::DriveAlone,
+                |x| Action::DriveWith(vec![x]),
+                Action::DriveWith,
+            ),
+            NavigatorCommand::Delete { ids } => fold_map_items(
+                ids,
+                Id,
+                Action::DeleteNavigatorFromSelection,
+                |x| Action::DeleteNavigators(vec![x]),
+                Action::DeleteNavigators,
+            ),
+            NavigatorCommand::As { ids } => fold_map_items(
+                ids,
+                Id,
+                Action::DriveAsFromSelection,
+                Action::DriveAs,
+                |_| panic!("Cannot drive as multiple drivers"),
+            ),
+            NavigatorCommand::Alone => Action::DriveAlone,
             NavigatorCommand::Show {
                 color,
                 fail_if_empty,
@@ -31,20 +51,28 @@ fn parse_args() -> Command {
                 let color = color
                     .map(|value| value.unwrap_or_else(|| "cyan".to_string()))
                     .unwrap_or_else(|| "none".to_string());
-                Command::nav(Action::Show(color, fail_if_empty))
+                Action::ShowCurrentNavigator(ShowNav {
+                    color,
+                    fail_if_empty,
+                })
             }
-            NavigatorCommand::List { cmd } => {
-                cmd.map_or(Command::nav(Action::List), |_| Command::drv(Action::List))
-            }
-            NavigatorCommand::New { id } => Command::nav(Action::New((id, None).into())),
-            NavigatorCommand::Edit { id } => Command::nav(Action::Edit((id, None).into())),
+            NavigatorCommand::List { cmd } => match cmd {
+                Some(_) => Action::ListDrivers,
+                None => Action::ListNavigators,
+            },
+            NavigatorCommand::New { id } => Action::NewNavigator((id, None).into()),
+            NavigatorCommand::Edit { id } => Action::EditNavigator((id, None).into()),
             NavigatorCommand::Me { cmd } => match cmd {
-                DriverCommand::List => Command::drv(Action::List),
-                DriverCommand::New { id, key } => Command::drv(Action::New((id, Some(key)).into())),
-                DriverCommand::Edit { id, key } => {
-                    Command::drv(Action::Edit((id, Some(key)).into()))
-                }
-                DriverCommand::Delete { ids } => Command::drv(Action::Delete(ids.into())),
+                DriverCommand::List => Action::ListDrivers,
+                DriverCommand::New { id, key } => Action::NewDriver((id, Some(key)).into()),
+                DriverCommand::Edit { id, key } => Action::EditDriver((id, Some(key)).into()),
+                DriverCommand::Delete { ids } => fold_map_items(
+                    ids,
+                    Id,
+                    Action::DeleteDriverFromSelection,
+                    |x| Action::DeleteDrivers(vec![x]),
+                    Action::DeleteDrivers,
+                ),
             },
         },
     }
@@ -85,7 +113,7 @@ enum NavigatorCommand {
     /// Change driver seat
     As {
         /// The navigators
-        #[clap(min_values = 0)]
+        #[clap(min_values = 0, max_values = 1)]
         ids: Vec<String>,
     },
 
@@ -188,15 +216,22 @@ enum ListCommand {
     Me,
 }
 
-impl From<Vec<String>> for Provided {
-    fn from(ids: Vec<String>) -> Self {
-        let ids = ids.into_iter().map(Id).collect::<Vec<_>>();
-        let ids = if ids.is_empty() { None } else { Some(ids) };
-        Provided(ids)
+fn fold_map_items<T, R>(
+    items: Vec<String>,
+    conv: impl Fn(String) -> T,
+    empty: R,
+    one: impl FnOnce(T) -> R,
+    many: impl FnOnce(Vec<T>) -> R,
+) -> R {
+    // one is the most common case
+    match <Vec<String> as TryInto<[String; 1]>>::try_into(items) {
+        Ok([item]) => one(conv(item)),
+        Err(items) if items.is_empty() => empty,
+        Err(items) => many(items.into_iter().map(&conv).collect()),
     }
 }
 
-impl From<(IdentityArgs, Option<KeyArgs>)> for New {
+impl From<(IdentityArgs, Option<KeyArgs>)> for PartialNav {
     fn from(
         (
             IdentityArgs {
@@ -211,7 +246,7 @@ impl From<(IdentityArgs, Option<KeyArgs>)> for New {
         let id = r#as.or(alias);
         let key = key.and_then(|k| k.key);
 
-        New {
+        PartialNav {
             id,
             name,
             email,

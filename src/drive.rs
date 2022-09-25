@@ -1,7 +1,7 @@
 use crate::{
     config::Config,
-    data::{Id, IdRef, Kind, Navigator},
-    io, Result,
+    data::{Id, IdRef, Kind, Navigator, ShowNav},
+    ui, Result,
 };
 use console::{style, Style};
 use eyre::{eyre, WrapErr};
@@ -13,7 +13,12 @@ use std::{
     process::Command as Proc,
 };
 
-pub(crate) fn current(color: String, fail_if_empty: bool) -> bool {
+pub(crate) fn current(
+    ShowNav {
+        color,
+        fail_if_empty,
+    }: ShowNav,
+) -> bool {
     let current = current_fallible(color);
     if fail_if_empty && matches!(current, Ok(false) | Err(_)) {
         std::process::exit(1);
@@ -24,19 +29,22 @@ pub(crate) fn current(color: String, fail_if_empty: bool) -> bool {
 
 pub(crate) fn select(config: &Config) -> Result<bool> {
     let currently = get_current().unwrap_or_default();
-    let ids = io::select_ids_from(Kind::Navigator, config, currently)?;
-    run(ids, config)
+    let ids = ui::select_ids_from(Kind::Navigator, config, currently)?;
+    run(ids.into_iter(), config)
 }
 
-pub(crate) fn run<A: IdRef>(ids: Vec<A>, config: &Config) -> Result<bool> {
-    if ids.is_empty() {
-        return drive_alone();
-    }
-
+pub(crate) fn run<A, I>(ids: I, config: &Config) -> Result<bool>
+where
+    A: IdRef,
+    I: ExactSizeIterator<Item = A>,
+{
     let navigators = ids
-        .into_iter()
         .map(|id| match_navigator(id.id(), config))
         .collect::<Result<Vec<_>>>()?;
+
+    if navigators.is_empty() {
+        return drive_alone();
+    }
 
     drive_with(navigators.into_iter())?;
 
@@ -51,7 +59,7 @@ fn match_navigator<'config>(query: &Id, config: &'config Config) -> Result<&'con
     let partial_matches = config
         .navigators
         .iter()
-        .filter(|n| match_caseless(&*query, n.borrow()));
+        .filter(|n| match_caseless(query, n.borrow()));
     if let Some(direct) = validate_matches(query, partial_matches) {
         return direct;
     }
@@ -115,7 +123,7 @@ fn match_caseless(query: &str, navigator: &str) -> bool {
     )
 }
 
-fn drive_alone() -> Result<bool> {
+pub(crate) fn drive_alone() -> Result<bool> {
     let sc = Proc::new("git")
         .args(&["config", "--unset", "commit.template"])
         .spawn()?
@@ -143,7 +151,7 @@ fn drive_alone() -> Result<bool> {
 /// U+001F - Information Separator One
 const SEPARATOR: u8 = 0x1F_u8;
 
-fn drive_with<'a>(navigators: impl Iterator<Item = &'a Navigator>) -> Result<()> {
+fn drive_with<'a>(navigators: impl ExactSizeIterator<Item = &'a Navigator>) -> Result<()> {
     let git_dir = git_dir()?;
 
     let (co_authored_lines, navigators): (Vec<_>, Vec<_>) = navigators
