@@ -12,7 +12,12 @@ publish = false
 
 [dependencies]
 caseless = "0.2.1"
-clap = { version = "3.2.22", default-features = false, features = ["std"] }
+clap = { version = "4.0.7", default-features = false, features = [
+    "std",
+    "help",
+    "usage",
+    "error-context",
+] }
 co-authors = { git = "https://github.com/s1ck/git-stats", branch = "polish-api", version = "0.1.0" }
 console = "=0.15.1" # keep at 0.15.1 to avoid lazy_static dependency
 dialoguer = { version = "0.10.2", default-features = false }

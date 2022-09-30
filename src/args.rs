@@ -2,10 +2,8 @@ use crate::{
     data::{Id, PartialNav, ShowNav},
     Result,
 };
-use clap::{
-    builder::ValueParser, AppSettings::DeriveDisplayOrder, Arg, ArgAction, ArgMatches, Command,
-};
-use std::ffi::OsString;
+use clap::{builder::ValueParser, error::ErrorKind, Arg, ArgAction, ArgMatches, Command};
+use std::{ffi::OsString, io::Write};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -36,9 +34,13 @@ pub(crate) fn action() -> Action {
 
 pub(crate) fn print_help_stderr() -> std::io::Result<()> {
     let mut app = Action::app();
+    let help = app.render_long_help();
+    drop(app);
+
     let out = std::io::stderr();
     let mut out = out.lock();
-    app.write_long_help(&mut out)
+    write!(out, "{}", help)?;
+    out.flush()
 }
 
 impl Action {
@@ -66,7 +68,7 @@ impl Action {
         }
     }
 
-    fn try_parse_from<I>(args: I) -> Result<Self, (Command<'static>, clap::Error)>
+    fn try_parse_from<I>(args: I) -> Result<Self, (Command, clap::Error)>
     where
         I: IntoIterator,
         I::Item: Into<OsString> + Clone,
@@ -86,7 +88,7 @@ impl Action {
         }
     }
 
-    fn app() -> Command<'static> {
+    fn app() -> Command {
         Command::new(env!("CARGO_PKG_NAME"))
             .version(env!("CARGO_PKG_VERSION"))
             .about(env!("CARGO_PKG_DESCRIPTION"))
@@ -94,10 +96,9 @@ impl Action {
             .infer_long_args(true)
             .infer_subcommands(true)
             .subcommand_required(false)
-            .global_setting(DeriveDisplayOrder)
             .subcommand(
                 Command::new("with")
-                    .arg(Self::ids_arg().required(true).min_values(1))
+                    .arg(Self::ids_arg().required(true).num_args(1..))
                     .about("Start driving with the specified navigator(s)"),
             )
             .subcommand(Command::new("alone").about("Start driving alone"))
@@ -114,6 +115,7 @@ impl Action {
                             .long("color")
                             .visible_alias("colour")
                             .value_name("COLOR")
+                            .num_args(..=1)
                             .default_missing_value("cyan")
                             .default_value("none")
                             .value_parser(ValueParser::string())
@@ -145,7 +147,7 @@ impl Action {
             )
             .subcommand(
                 Command::new("as")
-                    .arg(Self::ids_arg().max_values(1))
+                    .arg(Self::ids_arg().num_args(..=1))
                     .about("Change driver seat"),
             )
             .subcommand(
@@ -174,33 +176,29 @@ impl Action {
             )
     }
 
-    fn ids_arg() -> Arg<'static> {
+    fn ids_arg() -> Arg {
         Arg::new("ids")
             .value_name("IDS")
-            .takes_value(true)
-            .multiple_values(true)
             .value_parser(ValueParser::string())
             .action(ArgAction::Append)
             .help("The navigators")
     }
 
-    fn key_arg() -> Arg<'static> {
+    fn key_arg() -> Arg {
         Arg::new("key")
             .long("key")
             .visible_alias("signingkey")
             .value_name("KEY")
-            .takes_value(true)
             .value_parser(ValueParser::string())
             .action(ArgAction::Set)
             .help("The signing key to use")
     }
 
-    fn partial_nav_args() -> [Arg<'static>; 4] {
+    fn partial_nav_args() -> [Arg; 4] {
         [
             Arg::new("as")
                 .long("as")
                 .value_name("AS")
-                .takes_value(true)
                 .value_parser(ValueParser::string())
                 .action(ArgAction::Set)
                 .help("The identifier to use for the author's entry")
@@ -208,20 +206,17 @@ impl Action {
             Arg::new("name")
                 .long("name")
                 .value_name("NAME")
-                .takes_value(true)
                 .value_parser(ValueParser::string())
                 .action(ArgAction::Set)
                 .help("The author's name"),
             Arg::new("email")
                 .long("email")
                 .value_name("EMAIL")
-                .takes_value(true)
                 .value_parser(ValueParser::string())
                 .action(ArgAction::Set)
                 .help("The author's email"),
             Arg::new("alias")
                 .value_name("ALIAS")
-                .takes_value(true)
                 .value_parser(ValueParser::string())
                 .action(ArgAction::Set)
                 .help("The identifier to use for the author's entry")
@@ -268,7 +263,7 @@ impl Action {
                 .remove_subcommand()
                 .ok_or_else(|| {
                     clap::Error::raw(
-                        clap::ErrorKind::MissingSubcommand,
+                        ErrorKind::MissingSubcommand,
                         "A subcommand is required but one was not provided.",
                     )
                 })
@@ -303,7 +298,7 @@ impl Action {
 
     fn unknown_command(name: &str) -> clap::Error {
         clap::Error::raw(
-            clap::ErrorKind::UnrecognizedSubcommand,
+            ErrorKind::UnknownArgument,
             format!("The subcommand '{}' wasn't recognized", name),
         )
     }
@@ -327,7 +322,7 @@ mod tests {
     use std::convert::identity;
 
     use super::*;
-    use clap::ErrorKind;
+    use clap::error::ErrorKind;
 
     #[test]
     fn no_args_intiates_selection() {
@@ -868,5 +863,10 @@ mod tests {
     fn help_command() {
         let (_, res) = Action::try_parse_from(["help"]).unwrap_err();
         assert_eq!(res.kind(), ErrorKind::DisplayHelp);
+    }
+
+    #[test]
+    fn verify_cli() {
+        Action::app().debug_assert();
     }
 }
