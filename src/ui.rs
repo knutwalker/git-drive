@@ -7,13 +7,13 @@ use console::{style, Style, StyledObject};
 use dialoguer::{theme::ColorfulTheme, theme::Theme, Input, MultiSelect, Select, Validator};
 use eyre::eyre;
 use once_cell::sync::Lazy;
-use std::{fmt, marker::PhantomData};
+use std::{fmt, marker::PhantomData, option::Option};
 
-pub(crate) fn select_ids_from(
+pub fn select_ids_from<'config>(
     kind: Kind,
-    config: &Config,
-    pre_selected: Vec<Id>,
-) -> Result<Vec<&Id>> {
+    config: &'config Config,
+    pre_selected: &[Id],
+) -> Result<Vec<&'config Id>> {
     let selection = select_from(kind, config, pre_selected)?;
     let ids = match kind {
         Kind::Navigator => config
@@ -44,7 +44,7 @@ pub(crate) fn select_ids_from(
     Ok(ids)
 }
 
-fn select_from(kind: Kind, config: &Config, pre_select: Vec<Id>) -> Result<Vec<usize>> {
+fn select_from(kind: Kind, config: &Config, pre_select: &[Id]) -> Result<Vec<usize>> {
     let mut ms = MultiSelect::with_theme(&*THEME);
     ms.with_prompt(format!(
         "Select any number {}(s)\n  Use [space] to select, [return] to confirm",
@@ -76,7 +76,7 @@ fn select_from(kind: Kind, config: &Config, pre_select: Vec<Id>) -> Result<Vec<u
     Ok(chosen)
 }
 
-pub(crate) fn select_id_from(kind: Kind, config: &Config) -> Result<Id> {
+pub fn select_id_from(kind: Kind, config: &Config) -> Result<Id> {
     let mut select = Select::with_theme(&*THEME);
     select.with_prompt(format!(
         "Select one {}\n  Use arrows to select, [return] to confirm",
@@ -104,7 +104,7 @@ pub(crate) fn select_id_from(kind: Kind, config: &Config) -> Result<Id> {
     Ok(Id(id))
 }
 
-pub(crate) fn prompt_for_empty(
+pub fn prompt_for_empty(
     thing: &'static str,
     id: &str,
     initial: Option<String>,
@@ -122,23 +122,23 @@ pub(crate) fn prompt_for_empty(
     Ok(name)
 }
 
-pub(crate) fn prompt_for(thing: &'static str, id: &str, initial: Option<String>) -> Result<String> {
+pub fn prompt_for(thing: &'static str, id: &str, initial: Option<String>) -> Result<String> {
     prompt_for_empty(thing, id, initial, false)
 }
 
-pub(crate) fn complete_new_nav(partial: PartialNav, config: &Config) -> Result<Navigator> {
+pub fn complete_new_nav(partial: PartialNav, config: &Config) -> Result<Navigator> {
     complete_nav(CheckMode::MustNotExist, partial, config)
 }
 
-pub(crate) fn complete_existing_nav(partial: PartialNav, config: &Config) -> Result<Navigator> {
+pub fn complete_existing_nav(partial: PartialNav, config: &Config) -> Result<Navigator> {
     complete_nav(CheckMode::MustExist, partial, config)
 }
 
-pub(crate) fn complete_new_drv(partial: PartialNav, config: &Config) -> Result<Driver> {
+pub fn complete_new_drv(partial: PartialNav, config: &Config) -> Result<Driver> {
     complete_drv(CheckMode::MustNotExist, partial, config)
 }
 
-pub(crate) fn complete_existing_drv(partial: PartialNav, config: &Config) -> Result<Driver> {
+pub fn complete_existing_drv(partial: PartialNav, config: &Config) -> Result<Driver> {
     complete_drv(CheckMode::MustExist, partial, config)
 }
 
@@ -148,23 +148,20 @@ fn prompt_alias<T: Seat + Copy>(
     existing: Option<String>,
 ) -> Result<(Id, Option<&'_ T::Entity>)> {
     let mut lookup = Lookup::<T>::new(config, check);
-    let id = match existing {
-        Some(id) => {
-            lookup.validate(&id)?;
-            Id(id)
-        }
-        None => {
-            let input = Input::<String>::with_theme(&*THEME)
-            .with_prompt(format!("Please enter the alias for the {}.\n  The alias will be used as identifier for all other commands.\n", T::kind()))
-            .allow_empty(true)
-            .validate_with(CheckForEmpty::new("alias", false))
-            .validate_with(lookup)
-            .interact_text()?;
-            Id(input)
-        }
+    let id = if let Some(id) = existing {
+        lookup.validate(&id)?;
+        Id(id)
+    } else {
+        let input = Input::<String>::with_theme(&*THEME)
+                .with_prompt(format!("Please enter the alias for the {}.\n  The alias will be used as identifier for all other commands.\n", T::kind()))
+                .allow_empty(true)
+                .validate_with(CheckForEmpty::new("alias", false))
+                .validate_with(lookup)
+                .interact_text()?;
+        Id(input)
     };
 
-    let existing = lookup.matching_navigator(&*id);
+    let existing = lookup.matching_navigator(&id);
     Ok((id, existing))
 }
 
@@ -188,12 +185,12 @@ fn finish_nav(
 ) -> Result<Navigator> {
     let name = prompt_for(
         "name",
-        &*alias,
+        &alias,
         name.or_else(|| existing.map(|n| n.name.clone())),
     )?;
     let email = prompt_for(
         "email",
-        &*alias,
+        &alias,
         email.or_else(|| existing.map(|n| n.email.clone())),
     )?;
 
@@ -213,7 +210,7 @@ fn complete_drv(check: CheckMode, new: PartialNav, config: &Config) -> Result<Dr
 
     let key = prompt_for_empty(
         "signing key",
-        &*navigator.alias,
+        &navigator.alias,
         key.or_else(|| existing.and_then(|d| d.key.clone())),
         true,
     )?;
@@ -236,7 +233,7 @@ struct CheckForEmpty {
 }
 
 impl CheckForEmpty {
-    fn new(entity: &'static str, allow_empty: bool) -> Self {
+    const fn new(entity: &'static str, allow_empty: bool) -> Self {
         Self {
             messages: [MsgTemplate::MustNotBeEmpty, MsgTemplate::EnterANonEmptyName],
             entity,
@@ -317,7 +314,7 @@ struct Lookup<'a, T> {
 }
 
 impl<'a, T: Seat> Lookup<'a, T> {
-    fn new(config: &'a Config, check: CheckMode) -> Self {
+    const fn new(config: &'a Config, check: CheckMode) -> Self {
         Self {
             config,
             check,
@@ -405,7 +402,7 @@ impl Theme for PrettyTheme {
         &self,
         f: &mut dyn fmt::Write,
         prompt: &str,
-        selection: std::option::Option<bool>,
+        selection: Option<bool>,
     ) -> fmt::Result {
         Theme::format_confirm_prompt_selection(&self.theme, f, prompt, selection)
     }

@@ -208,8 +208,7 @@ fn deserialize_config_json(content: &str) -> Result<Config> {
 
 pub fn store(config: &Config) -> Result<()> {
     let file = match config_file(Mode::Write)? {
-        ConfigFile::New(path) => path,
-        ConfigFile::Old(path) => path,
+        ConfigFile::New(path) | ConfigFile::Old(path) => path,
         ConfigFile::Missing => bail!("The configuration directoy could not be found"),
     };
 
@@ -322,6 +321,7 @@ fn config_file_in(mode: Mode, dir: &Path) -> Result<ConfigFile> {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
 enum Mode {
     Read,
     Write,
@@ -337,9 +337,8 @@ enum ConfigFile {
 impl std::fmt::Display for ConfigFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ConfigFile::New(path) => path.display().fmt(f),
-            ConfigFile::Old(path) => path.display().fmt(f),
-            ConfigFile::Missing => f.write_str("<missing>"),
+            Self::New(path) | Self::Old(path) => path.display().fmt(f),
+            Self::Missing => f.write_str("<missing>"),
         }
     }
 }
@@ -388,7 +387,7 @@ mod tests {
 
         let config = serialize_config(&config);
 
-        assert_eq!(config, "version: 1\n")
+        assert_eq!(config, "version: 1\n");
     }
 
     #[test]
@@ -407,7 +406,7 @@ mod tests {
                 "navigator: nav1\n",
                 "Co-Authored-By: bernd <foo@bar.org>\n",
             )
-        )
+        );
     }
 
     #[test]
@@ -428,7 +427,7 @@ mod tests {
                 "navigator: nav2\n",
                 "Co-Authored-By: ronny <baz@bar.org>\n",
             )
-        )
+        );
     }
 
     #[test]
@@ -448,7 +447,7 @@ mod tests {
                 "key:\n",
                 "Co-Authored-By: ralle <qux@bar.org>\n",
             )
-        )
+        );
     }
 
     #[test]
@@ -468,7 +467,7 @@ mod tests {
                 "key: my-key.pub\n",
                 "Co-Authored-By: ralle <qux@bar.org>\n",
             )
-        )
+        );
     }
 
     #[test]
@@ -492,7 +491,7 @@ mod tests {
                 "key: my-key.pub\n",
                 "Co-Authored-By: ralle <qux@bar.org>\n",
             )
-        )
+        );
     }
 
     #[test]
@@ -603,7 +602,7 @@ mod tests {
         assert_eq!(
             config.to_string(),
             "The config file is empty, expected at least a version key."
-        )
+        );
     }
 
     #[test]
@@ -613,14 +612,14 @@ mod tests {
         assert_eq!(
             config.to_string(),
             "Expected `version: $version`, but got `navigator: bernd` in line 1."
-        )
+        );
     }
 
     #[test]
     fn deserialize_unexpected_version() {
         let config = "version: 2";
         let config = deserialize_config(config).unwrap_err();
-        assert_eq!(config.to_string(), "Unknown version: 2.")
+        assert_eq!(config.to_string(), "Unknown version: 2.");
     }
 
     #[test]
@@ -630,7 +629,7 @@ mod tests {
         assert_eq!(
             config.to_string(),
             "Unexpted type `foo in line 2, expected either `navigator` or `driver`."
-        )
+        );
     }
 
     #[test]
@@ -640,7 +639,7 @@ mod tests {
         assert_eq!(
             config.to_string(),
             "Expected `Co-Authored-By: $name <$email>` in line 3, but reached the end of the file."
-        )
+        );
     }
 
     #[test]
@@ -650,7 +649,7 @@ mod tests {
         assert_eq!(
             config.to_string(),
             "Expected `Co-Authored-By: $name <$email>` in line 3, but got: The trailer is missing the `Co-Authored-By:` key."
-        )
+        );
     }
 
     #[test]
@@ -660,7 +659,7 @@ mod tests {
         assert_eq!(
             config.to_string(),
             "Expected `Co-Authored-By: $name <$email>` in line 3, but got: The trailer is missing the `Co-Authored-By:` key."
-        )
+        );
     }
 
     #[test]
@@ -670,7 +669,7 @@ mod tests {
         assert_eq!(
             config.to_string(),
             "Expected `Co-Authored-By: $name <$email>` in line 3, but got: The name of the co-author is missing."
-        )
+        );
     }
 
     #[test]
@@ -708,7 +707,7 @@ mod tests {
         let cfg = config_file_in(Mode::Read, dir.path()).unwrap();
         assert_eq!(cfg, ConfigFile::Missing);
 
-        dir.close().unwrap()
+        dir.close().unwrap();
     }
 
     #[test]
@@ -720,7 +719,7 @@ mod tests {
         let cfg = config_file_in(Mode::Read, dir.path()).unwrap();
         assert_eq!(cfg, ConfigFile::Old(file.path().to_path_buf()));
 
-        dir.close().unwrap()
+        dir.close().unwrap();
     }
 
     #[test]
@@ -732,7 +731,7 @@ mod tests {
         let cfg = config_file_in(Mode::Read, dir.path()).unwrap();
         assert_eq!(cfg, ConfigFile::New(file.path().to_path_buf()));
 
-        dir.close().unwrap()
+        dir.close().unwrap();
     }
 
     #[test]
@@ -745,7 +744,7 @@ mod tests {
         let cfg = config_file_in(Mode::Read, dir.path()).unwrap();
         assert_eq!(cfg, ConfigFile::New(file.path().to_path_buf()));
 
-        dir.close().unwrap()
+        dir.close().unwrap();
     }
 
     #[test]
@@ -756,7 +755,7 @@ mod tests {
         let cfg = config_file_in(Mode::Write, dir.path()).unwrap();
         assert_eq!(cfg, ConfigFile::New(file.path().to_path_buf()));
 
-        dir.close().unwrap()
+        dir.close().unwrap();
     }
 
     #[test]
@@ -769,7 +768,7 @@ mod tests {
         let cfg = config_file_in(Mode::Write, dir.path()).unwrap();
         assert_eq!(cfg, ConfigFile::New(file.path().to_path_buf()));
 
-        dir.close().unwrap()
+        dir.close().unwrap();
     }
 
     #[test]
@@ -781,7 +780,7 @@ mod tests {
         let cfg = config_file_in(Mode::Write, dir.path()).unwrap();
         assert_eq!(cfg, ConfigFile::New(file.path().to_path_buf()));
 
-        dir.close().unwrap()
+        dir.close().unwrap();
     }
 
     #[test]
@@ -794,7 +793,7 @@ mod tests {
         let cfg = config_file_in(Mode::Write, dir.path()).unwrap();
         assert_eq!(cfg, ConfigFile::New(file.path().to_path_buf()));
 
-        dir.close().unwrap()
+        dir.close().unwrap();
     }
 
     #[test]
@@ -827,6 +826,6 @@ mod tests {
 
         assert_eq!(roundtrip, config);
 
-        dir.close().unwrap()
+        dir.close().unwrap();
     }
 }

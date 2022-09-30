@@ -13,13 +13,13 @@ use std::{
     process::Command as Proc,
 };
 
-pub(crate) fn current(
+pub fn current(
     ShowNav {
         color,
         fail_if_empty,
     }: ShowNav,
 ) -> bool {
-    let current = current_fallible(color);
+    let current = current_fallible(&color);
     if fail_if_empty && matches!(current, Ok(false) | Err(_)) {
         std::process::exit(1);
     }
@@ -27,13 +27,13 @@ pub(crate) fn current(
     false
 }
 
-pub(crate) fn select(config: &Config) -> Result<bool> {
+pub fn select(config: &Config) -> Result<bool> {
     let currently = get_current().unwrap_or_default();
-    let ids = ui::select_ids_from(Kind::Navigator, config, currently)?;
+    let ids = ui::select_ids_from(Kind::Navigator, config, &currently)?;
     run(&ids, config)
 }
 
-pub(crate) fn run<I>(ids: &[I], config: &Config) -> Result<bool>
+pub fn run<I>(ids: &[I], config: &Config) -> Result<bool>
 where
     I: IdRef,
 {
@@ -71,9 +71,9 @@ fn validate_matches<'config>(
     query: &Id,
     mut matches: impl Iterator<Item = &'config Navigator>,
 ) -> Option<Result<&'config Navigator>> {
-    if let Some(direct) = matches.next() {
+    matches.next().map(|direct| {
         let conflicting = matches.collect::<Vec<_>>();
-        Some(if conflicting.is_empty() {
+        if conflicting.is_empty() {
             Ok(direct)
         } else {
             Err(eyre!(
@@ -82,10 +82,8 @@ fn validate_matches<'config>(
                 direct.id().as_ref(),
                 conflicting.join(", ")
             ))
-        })
-    } else {
-        None
-    }
+        }
+    })
 }
 
 fn match_caseless(query: &str, navigator: &str) -> bool {
@@ -123,14 +121,14 @@ fn match_caseless(query: &str, navigator: &str) -> bool {
     )
 }
 
-pub(crate) fn drive_alone() -> Result<bool> {
+pub fn drive_alone() -> Result<bool> {
     let sc = Proc::new("git")
         .args(&["config", "--unset", "commit.template"])
         .spawn()?
         .wait()?;
 
     match sc.code() {
-        Some(0) | Some(5) => {}
+        Some(0 | 5) => {}
         Some(c) => std::process::exit(c),
         None => std::process::exit(127),
     }
@@ -169,7 +167,7 @@ fn drive_with<'a>(navigators: impl ExactSizeIterator<Item = &'a Navigator>) -> R
     let navigators = navigators.join([SEPARATOR].as_ref());
     let mut current_navigators_file = git_dir;
     current_navigators_file.push(concat!(".", env!("CARGO_PKG_NAME"), "_current_navigators"));
-    write_data(&current_navigators_file, navigators)
+    write_data(&current_navigators_file, &navigators)
         .wrap_err_with(|| format!("File: {}", current_navigators_file.display()))?;
     println!(
         "git-commit set template to {}.",
@@ -218,17 +216,17 @@ fn write_template(file: &Path, data: impl Iterator<Item = String>) -> Result<()>
     Ok(())
 }
 
-fn write_data(file: &Path, data: Vec<u8>) -> Result<()> {
+fn write_data(file: &Path, data: &[u8]) -> Result<()> {
     use std::io::Write;
     let mut f = File::create(file)?;
-    f.write_all(&data)?;
+    f.write_all(data)?;
     f.flush()?;
     Ok(())
 }
 
-fn current_fallible(color: String) -> Result<bool> {
+fn current_fallible(color: &str) -> Result<bool> {
     let ids = get_current()?;
-    let style = Style::from_dotted_str(&color);
+    let style = Style::from_dotted_str(color);
     let has_current = !ids.is_empty();
     let s = ids
         .into_iter()

@@ -46,7 +46,42 @@ git drive as alias
 ```
 
 */
-#![warn(unused_crate_dependencies)]
+#![warn(clippy::all, clippy::nursery)]
+#![warn(clippy::cargo, clippy::pedantic)]
+#![warn(
+    bad_style,
+    const_err,
+    dead_code,
+    improper_ctypes,
+    missing_copy_implementations,
+    missing_debug_implementations,
+    no_mangle_generic_items,
+    non_shorthand_field_patterns,
+    overflowing_literals,
+    path_statements,
+    patterns_in_fns_without_body,
+    private_in_public,
+    rust_2018_idioms,
+    rust_2021_compatibility,
+    rust_2021_incompatible_or_patterns,
+    rust_2021_incompatible_closure_captures,
+    rust_2021_prefixes_incompatible_syntax,
+    rust_2021_prelude_collisions,
+    trivial_casts,
+    trivial_numeric_casts,
+    unconditional_recursion,
+    unsafe_op_in_unsafe_fn,
+    unused_allocation,
+    unused_comparisons,
+    unused_crate_dependencies,
+    unused_extern_crates,
+    unused_import_braces,
+    unused_parens,
+    unused_qualifications,
+    unused,
+    while_true
+)]
+#![allow(clippy::module_name_repetitions)]
 
 use crate::{args::Action, config::Config, data::Kind};
 use console::style;
@@ -76,13 +111,14 @@ fn main() -> Result<()> {
         Action::DeleteNavigatorFromSelection => delete::select(Kind::Navigator, &mut config)?,
         Action::DeleteNavigator(id) => delete::run(Kind::Navigator, &mut config, from_ref(&id)),
         Action::DeleteAllNavigators(ids) => delete::run(Kind::Navigator, &mut config, &ids),
-        Action::DriveAsFromSelection => bail!("Switching seats not yet implemented"),
-        Action::DriveAs(_) => bail!("Switching seats not yet implemented"),
         Action::NewDriver(partial) => new::run(Kind::Driver, &mut config, partial)?,
         Action::EditDriver(partial) => edit::run(Kind::Driver, &mut config, partial)?,
         Action::DeleteDriverFromSelection => delete::select(Kind::Driver, &mut config)?,
         Action::DeleteDriver(id) => delete::run(Kind::Driver, &mut config, from_ref(&id)),
         Action::DeleteAllDrivers(ids) => delete::run(Kind::Driver, &mut config, &ids),
+        Action::DriveAsFromSelection | Action::DriveAs(_) => {
+            bail!("Switching seats not yet implemented")
+        }
     };
 
     if changed {
@@ -123,16 +159,16 @@ mod list {
         data::{Kind, Navigator},
     };
 
-    pub(crate) fn run(kind: Kind, config: &Config) -> bool {
+    pub fn run(kind: Kind, config: &Config) -> bool {
         match kind {
             Kind::Navigator => {
                 for nav in &config.navigators {
-                    print_nav(nav)
+                    print_nav(nav);
                 }
             }
             Kind::Driver => {
                 for drv in &config.drivers {
-                    print_nav(&drv.navigator)
+                    print_nav(&drv.navigator);
                 }
             }
         };
@@ -140,7 +176,7 @@ mod list {
     }
 
     fn print_nav(nav: &Navigator) {
-        println!("{}: {} <{}>", &*nav.alias, nav.name, nav.email)
+        println!("{}: {} <{}>", &*nav.alias, nav.name, nav.email);
     }
 }
 
@@ -151,7 +187,7 @@ mod new {
         ui, Result,
     };
 
-    pub(crate) fn run(kind: Kind, config: &mut Config, partial: PartialNav) -> Result<bool> {
+    pub fn run(kind: Kind, config: &mut Config, partial: PartialNav) -> Result<bool> {
         match kind {
             Kind::Navigator => {
                 let navigator = ui::complete_new_nav(partial, config)?;
@@ -174,7 +210,7 @@ mod edit {
     };
     use eyre::bail;
 
-    pub(crate) fn run(kind: Kind, config: &mut Config, mut new: PartialNav) -> Result<bool> {
+    pub fn run(kind: Kind, config: &mut Config, mut new: PartialNav) -> Result<bool> {
         if new.id.is_none() {
             match kind {
                 Kind::Navigator => {
@@ -222,15 +258,15 @@ mod delete {
         ui, Result,
     };
 
-    pub(crate) fn select(kind: Kind, config: &mut Config) -> Result<bool> {
-        let ids: Vec<Id> = ui::select_ids_from(kind, config, Vec::new())?
+    pub fn select(kind: Kind, config: &mut Config) -> Result<bool> {
+        let ids: Vec<Id> = ui::select_ids_from(kind, config, &[])?
             .into_iter()
             .cloned()
             .collect();
         Ok(run(kind, config, &ids))
     }
 
-    pub(crate) fn run<I: IdRef>(kind: Kind, config: &mut Config, ids: &[I]) -> bool {
+    pub fn run<I: IdRef>(kind: Kind, config: &mut Config, ids: &[I]) -> bool {
         match kind {
             Kind::Navigator => do_delete(&mut config.navigators, ids),
             Kind::Driver => do_delete(&mut config.drivers, ids),
@@ -242,7 +278,7 @@ mod delete {
         let mut i = 0;
         while i != data.len() {
             if ids.iter().any(|id| id.id() == data[i].id()) {
-                let _ = data.remove(i);
+                drop(data.remove(i));
                 changed = true;
             } else {
                 i += 1;

@@ -70,8 +70,8 @@ impl<T: Into<String>> From<T> for Id {
 impl fmt::Display for Kind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Kind::Navigator => f.pad("navigator"),
-            Kind::Driver => f.pad("driver"),
+            Self::Navigator => f.pad("navigator"),
+            Self::Driver => f.pad("driver"),
         }
     }
 }

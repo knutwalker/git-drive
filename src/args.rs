@@ -3,7 +3,7 @@ use crate::{
     Result,
 };
 use clap::{builder::ValueParser, error::ErrorKind, Arg, ArgAction, ArgMatches, Command};
-use std::{ffi::OsString, io::Write};
+use std::{convert::Into, ffi::OsString, io::Write};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -28,11 +28,11 @@ pub enum Action {
     DeleteAllDrivers(Vec<Id>),
 }
 
-pub(crate) fn action() -> Action {
+pub fn action() -> Action {
     Action::parse()
 }
 
-pub(crate) fn print_help_stderr() -> std::io::Result<()> {
+pub fn print_help_stderr() -> std::io::Result<()> {
     let mut app = Action::app();
     let help = app.render_long_help();
     drop(app);
@@ -75,7 +75,7 @@ impl Action {
     {
         #[cfg(test)]
         let args =
-            std::iter::once(OsString::from("test-prog")).chain(args.into_iter().map(|s| s.into()));
+            std::iter::once(OsString::from("test-prog")).chain(args.into_iter().map(Into::into));
 
         let mut app = Self::app();
         let matches = match app.try_get_matches_from_mut(args) {
@@ -224,39 +224,39 @@ impl Action {
         ]
     }
 
-    fn action_from_matches(mut matches: ArgMatches) -> Result<Action, clap::Error> {
+    fn action_from_matches(mut matches: ArgMatches) -> Result<Self, clap::Error> {
         let (name, mut matches) = match matches.remove_subcommand() {
-            None => return Ok(Action::DriveFromSelection),
+            None => return Ok(Self::DriveFromSelection),
             Some((name, matches)) => (name, matches),
         };
         match name.as_str() {
             "with" => Ok(fold_map(
                 matches.remove_many::<String>("ids"),
-                Action::DriveAlone,
-                Action::DriveWith,
-                Action::DriveWithAll,
+                Self::DriveAlone,
+                Self::DriveWith,
+                Self::DriveWithAll,
             )),
-            "alone" => Ok(Action::DriveAlone),
+            "alone" => Ok(Self::DriveAlone),
             "list" => Ok(matches
                 .subcommand()
-                .map(|_| Action::ListDrivers)
-                .unwrap_or(Action::ListNavigators)),
-            "show" => Ok(Action::ShowCurrentNavigator(ShowNav {
+                .map(|_| Self::ListDrivers)
+                .unwrap_or(Self::ListNavigators)),
+            "show" => Ok(Self::ShowCurrentNavigator(ShowNav {
                 color: matches.remove_one::<String>("color").expect("has default"),
                 fail_if_empty: matches.get_flag("fail-if-empty"),
             })),
-            "new" => Ok(Action::NewNavigator(Self::partial_nav(matches, false))),
-            "edit" => Ok(Action::EditNavigator(Self::partial_nav(matches, false))),
+            "new" => Ok(Self::NewNavigator(Self::partial_nav(matches, false))),
+            "edit" => Ok(Self::EditNavigator(Self::partial_nav(matches, false))),
             "delete" => Ok(fold_map(
                 matches.remove_many::<String>("ids"),
-                Action::DeleteNavigatorFromSelection,
-                Action::DeleteNavigator,
-                Action::DeleteAllNavigators,
+                Self::DeleteNavigatorFromSelection,
+                Self::DeleteNavigator,
+                Self::DeleteAllNavigators,
             )),
             "as" => Ok(fold_map(
                 matches.remove_many::<String>("ids"),
-                Action::DriveAsFromSelection,
-                Action::DriveAs,
+                Self::DriveAsFromSelection,
+                Self::DriveAs,
                 |_| panic!("Cannot drive as multiple drivers"),
             )),
             "me" => matches
@@ -269,14 +269,14 @@ impl Action {
                 })
                 .and_then(|(name, mut matches)| {
                     Ok(match name.as_str() {
-                        "list" => Action::ListDrivers,
-                        "new" => Action::NewDriver(Self::partial_nav(matches, true)),
-                        "edit" => Action::EditDriver(Self::partial_nav(matches, true)),
+                        "list" => Self::ListDrivers,
+                        "new" => Self::NewDriver(Self::partial_nav(matches, true)),
+                        "edit" => Self::EditDriver(Self::partial_nav(matches, true)),
                         "delete" => fold_map(
                             matches.remove_many::<String>("ids"),
-                            Action::DeleteDriverFromSelection,
-                            Action::DeleteDriver,
-                            Action::DeleteAllDrivers,
+                            Self::DeleteDriverFromSelection,
+                            Self::DeleteDriver,
+                            Self::DeleteAllDrivers,
                         ),
                         othwerise => return Err(Self::unknown_command(othwerise)),
                     })
@@ -327,7 +327,7 @@ mod tests {
     #[test]
     fn no_args_intiates_selection() {
         let action = Action::parse_from(identity::<[&str; 0]>([]));
-        assert_eq!(action, Action::DriveFromSelection)
+        assert_eq!(action, Action::DriveFromSelection);
     }
 
     #[test]
@@ -422,7 +422,7 @@ mod tests {
                 email: None,
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -436,7 +436,7 @@ mod tests {
                 email: None,
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -450,7 +450,7 @@ mod tests {
                 email: None,
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -470,7 +470,7 @@ mod tests {
                 email: None,
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -484,7 +484,7 @@ mod tests {
                 email: Some(String::from("foo")),
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -499,7 +499,7 @@ mod tests {
                 email: Some(String::from("bar")),
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -513,7 +513,7 @@ mod tests {
                 email: Some(String::from("bar")),
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -527,7 +527,7 @@ mod tests {
                 email: None,
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -541,7 +541,7 @@ mod tests {
                 email: Some(String::from("foo")),
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -556,7 +556,7 @@ mod tests {
                 email: Some(String::from("bar")),
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -570,7 +570,7 @@ mod tests {
                 email: Some(String::from("bar")),
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -629,7 +629,7 @@ mod tests {
                 email: None,
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -643,7 +643,7 @@ mod tests {
                 email: None,
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -657,7 +657,7 @@ mod tests {
                 email: None,
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -677,7 +677,7 @@ mod tests {
                 email: None,
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -691,7 +691,7 @@ mod tests {
                 email: Some(String::from("foo")),
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -705,7 +705,7 @@ mod tests {
                 email: None,
                 key: Some(String::from("foo")),
             })
-        )
+        );
     }
 
     #[test]
@@ -721,7 +721,7 @@ mod tests {
                 email: Some(String::from("bar")),
                 key: Some(String::from("baz")),
             })
-        )
+        );
     }
 
     #[test]
@@ -737,7 +737,7 @@ mod tests {
                 email: Some(String::from("bar")),
                 key: Some(String::from("baz")),
             })
-        )
+        );
     }
 
     #[test]
@@ -751,7 +751,7 @@ mod tests {
                 email: None,
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -765,7 +765,7 @@ mod tests {
                 email: Some(String::from("foo")),
                 key: None,
             })
-        )
+        );
     }
 
     #[test]
@@ -779,7 +779,7 @@ mod tests {
                 email: None,
                 key: Some(String::from("foo")),
             })
-        )
+        );
     }
 
     #[test]
@@ -795,7 +795,7 @@ mod tests {
                 email: Some(String::from("bar")),
                 key: Some(String::from("baz")),
             })
-        )
+        );
     }
 
     #[test]
@@ -811,7 +811,7 @@ mod tests {
                 email: Some(String::from("bar")),
                 key: Some(String::from("baz")),
             })
-        )
+        );
     }
 
     #[test]
