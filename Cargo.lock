@@ -61,6 +61,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "co-authors"
+version = "0.1.0"
+source = "git+https://github.com/s1ck/git-stats?branch=polish-api#1efa08b98dc7b630156c0d544cff100e6ce8d5f5"
+dependencies = [
+ "nom",
+]
+
+[[package]]
 name = "console"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -136,6 +144,7 @@ version = "0.5.0"
 dependencies = [
  "caseless",
  "clap",
+ "co-authors",
  "console",
  "dialoguer",
  "directories",
@@ -180,6 +189,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 
 [[package]]
+name = "minimal-lexical"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
+
+[[package]]
 name = "nanoserde"
 version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -193,6 +208,16 @@ name = "nanoserde-derive"
 version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "290eec6719d68aef1f5ca0e695f8ad6421adcf8791fc17641c4ccc6c5388fb39"
+
+[[package]]
+name = "nom"
+version = "7.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8903e5a29a317527874d0402f867152a3d21c908bb0b933e416c65e301d4c36"
+dependencies = [
+ "memchr",
+ "minimal-lexical",
+]
 
 [[package]]
 name = "once_cell"
