@@ -89,7 +89,7 @@ fn main() -> Result<()> {
     };
 
     if changed {
-        config::store(config)?;
+        config::store(&config)?;
     }
 
     Ok(())

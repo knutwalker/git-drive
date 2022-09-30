@@ -248,8 +248,9 @@ fn get_current() -> Result<Vec<Id>> {
 
     let ids = data
         .split(|b| *b == SEPARATOR)
-        .map(|s| Ok(Id(String::from_utf8(s.to_vec())?)))
-        .collect::<Result<Vec<_>>>()?;
+        .map(std::str::from_utf8)
+        .map(|s| s.map(String::from).map(Id))
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(ids)
 }
