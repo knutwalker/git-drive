@@ -14,14 +14,14 @@ impl Id {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Navigator {
     pub alias: Id,
     pub name: String,
     pub email: String,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Driver {
     pub navigator: Navigator,
     pub key: Option<String>,
