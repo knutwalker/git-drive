@@ -13,10 +13,7 @@ publish = false
 [dependencies]
 caseless = "0.2.1"
 console = "0.15.1"
-clap = { version = "3.2.22", default-features = false, features = [
-    "derive",
-    "std",
-] }
+clap = { version = "3.2.22", default-features = false, features = ["std"] }
 dialoguer = { version = "0.10.2", default-features = false }
 directories = "4.0.1"
 eyre = "0.6.8"
