@@ -1,6 +1,3 @@
-#![allow(clippy::question_mark)]
-
-use nanoserde::{DeJson, SerJson};
 use std::{borrow::Borrow, fmt, ops::Deref};
 
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
@@ -17,7 +14,7 @@ impl Id {
     }
 }
 
-#[derive(Debug, Default, DeJson, SerJson)]
+#[derive(Debug, Default)]
 pub struct Navigator {
     pub alias: Id,
     pub name: String,
@@ -90,67 +87,6 @@ impl AsRef<str> for Id {
 impl From<&str> for Id {
     fn from(v: &str) -> Self {
         Id(v.to_string())
-    }
-}
-
-impl DeJson for Id {
-    fn de_json(
-        s: &mut nanoserde::DeJsonState,
-        i: &mut std::str::Chars,
-    ) -> Result<Self, nanoserde::DeJsonErr> {
-        Ok(Id(DeJson::de_json(s, i)?))
-    }
-}
-impl SerJson for Id {
-    fn ser_json(&self, d: usize, s: &mut nanoserde::SerJsonState) {
-        self.0.ser_json(d, s);
-    }
-}
-
-impl DeJson for Driver {
-    fn de_json(
-        s: &mut nanoserde::DeJsonState,
-        i: &mut std::str::Chars,
-    ) -> Result<Self, nanoserde::DeJsonErr> {
-        let flat: FlatDriver = DeJson::de_json(s, i)?;
-        Ok(flat.into())
-    }
-}
-impl SerJson for Driver {
-    fn ser_json(&self, d: usize, s: &mut nanoserde::SerJsonState) {
-        let flat: FlatDriver = Into::into(self);
-        flat.ser_json(d, s);
-    }
-}
-#[derive(DeJson, SerJson)]
-struct FlatDriver {
-    alias: Id,
-    name: String,
-    email: String,
-    key: Option<String>,
-}
-
-impl From<&Driver> for FlatDriver {
-    fn from(val: &Driver) -> Self {
-        FlatDriver {
-            alias: val.navigator.alias.clone(),
-            name: val.navigator.name.clone(),
-            email: val.navigator.email.clone(),
-            key: val.key.clone(),
-        }
-    }
-}
-
-impl From<FlatDriver> for Driver {
-    fn from(val: FlatDriver) -> Self {
-        Driver {
-            navigator: Navigator {
-                alias: val.alias,
-                name: val.name,
-                email: val.email,
-            },
-            key: val.key,
-        }
     }
 }
 

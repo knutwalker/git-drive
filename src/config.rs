@@ -4,7 +4,6 @@ use crate::{
 };
 use directories::ProjectDirs;
 use eyre::{bail, ensure, eyre, WrapErr};
-use nanoserde::{DeJson, SerJson};
 use std::{
     convert::TryFrom,
     fs::{self, File},
@@ -12,11 +11,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-static APPLICATION: &str = env!("CARGO_PKG_NAME");
-static OLD_CONFIG_FILE: &str = concat!(env!("CARGO_PKG_NAME"), "_config.json");
-static CONFIG_FILE: &str = concat!(env!("CARGO_PKG_NAME"), "_config.gitdrive");
+const APPLICATION: &str = env!("CARGO_PKG_NAME");
+const OLD_CONFIG_FILE: &str = concat!(env!("CARGO_PKG_NAME"), "_config.json");
+const CONFIG_FILE: &str = concat!(env!("CARGO_PKG_NAME"), "_config.gitdrive");
 
-#[derive(Debug, Default, DeJson, SerJson)]
+#[derive(Debug, Default)]
 pub struct Config {
     pub navigators: Vec<Navigator>,
     pub drivers: Vec<Driver>,
@@ -32,7 +31,8 @@ pub fn load() -> Result<Config> {
         }
         ConfigFile::Old(path) => {
             let content = fs::read_to_string(path)?;
-            let cfg = load_from_json(content)?;
+            let cfg = load_from_json(content)
+                .with_context(|| format!("Reading config data from {}", path.display()))?;
             store(&cfg)?;
             Ok(cfg)
         }
@@ -134,9 +134,64 @@ fn load_from_cfg(content: String) -> Result<Config> {
 }
 
 fn load_from_json(content: String) -> Result<Config> {
-    let cfg =
-        DeJson::deserialize_json(&content).context("Could not read the configuration data")?;
-    Ok(cfg)
+    use serde_json::Value;
+
+    fn read_nav(nav: &Value) -> Result<Navigator> {
+        let alias = nav["alias"]
+            .as_str()
+            .ok_or_else(|| eyre!("alias is not a string"))?;
+
+        let name = nav["name"]
+            .as_str()
+            .ok_or_else(|| eyre!("name is not a string"))?;
+
+        let email = nav["email"]
+            .as_str()
+            .ok_or_else(|| eyre!("email is not a string"))?;
+
+        Ok(Navigator {
+            alias: Id(String::from(alias)),
+            name: String::from(name),
+            email: String::from(email),
+        })
+    }
+
+    let cfg = serde_json::from_str::<Value>(&content)?;
+
+    let mut navigators = Vec::new();
+    let mut drivers = Vec::new();
+
+    for nav in cfg["navigators"]
+        .as_array()
+        .ok_or_else(|| eyre!("navigators is not an array"))?
+    {
+        let nav = read_nav(nav)?;
+        navigators.push(nav);
+    }
+
+    for drv in cfg["drivers"]
+        .as_array()
+        .ok_or_else(|| eyre!("drivers is not an array"))?
+    {
+        let key = &drv["key"];
+        let key = match key {
+            Value::Null => None,
+            Value::String(key) => Some(key),
+            _ => bail!("key is not a string"),
+        };
+        let nav = read_nav(drv)?;
+        let drv = Driver {
+            navigator: nav,
+            key: key.map(String::from),
+        };
+
+        drivers.push(drv);
+    }
+
+    Ok(Config {
+        navigators,
+        drivers,
+    })
 }
 
 pub fn store(config: &Config) -> Result<()> {
