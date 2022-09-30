@@ -19,7 +19,7 @@ clap = { version = "4.0.7", default-features = false, features = [
     "error-context",
 ] }
 co-authors = { git = "https://github.com/s1ck/git-stats", branch = "polish-api", version = "0.1.0" }
-console = "=0.15.1" # keep at 0.15.1 to avoid lazy_static dependency
+console = "=0.15.2" # keep at 0.15.1 to avoid lazy_static dependency
 dialoguer = { version = "0.10.2", default-features = false }
 directories = "4.0.1"
 eyre = "0.6.8"
