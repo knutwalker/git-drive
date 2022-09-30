@@ -54,6 +54,7 @@ use crate::{
 };
 use console::style;
 use eyre::{bail, Result};
+use std::slice::from_ref;
 
 mod args;
 mod config;
@@ -66,22 +67,25 @@ fn main() -> Result<()> {
     let mut config = config::load()?;
 
     let changed = match action {
-        Action::ListNavigators => list::run(Kind::Navigator, &config),
-        Action::DriveAlone => drive::drive_alone()?,
         Action::DriveFromSelection => select_drive(&config)?,
-        Action::DriveWith(ids) => drive::run(ids.into_iter(), &config)?,
+        Action::DriveWith(id) => drive::run(from_ref(&id), &config)?,
+        Action::DriveWithAll(ids) => drive::run(&ids, &config)?,
+        Action::DriveAlone => drive::drive_alone()?,
+        Action::ListNavigators => list::run(Kind::Navigator, &config),
+        Action::ListDrivers => list::run(Kind::Driver, &config),
         Action::ShowCurrentNavigator(show) => drive::current(show),
         Action::NewNavigator(partial) => new::run(Kind::Navigator, &mut config, partial)?,
         Action::EditNavigator(partial) => edit::run(Kind::Navigator, &mut config, partial)?,
         Action::DeleteNavigatorFromSelection => delete::select(Kind::Navigator, &mut config)?,
-        Action::DeleteNavigators(ids) => delete::run(Kind::Navigator, &mut config, &ids),
-        Action::ListDrivers => list::run(Kind::Driver, &config),
+        Action::DeleteNavigator(id) => delete::run(Kind::Navigator, &mut config, from_ref(&id)),
+        Action::DeleteAllNavigators(ids) => delete::run(Kind::Navigator, &mut config, &ids),
         Action::DriveAsFromSelection => bail!("Switching seats not yet implemented"),
         Action::DriveAs(_) => bail!("Switching seats not yet implemented"),
         Action::NewDriver(partial) => new::run(Kind::Driver, &mut config, partial)?,
         Action::EditDriver(partial) => edit::run(Kind::Driver, &mut config, partial)?,
         Action::DeleteDriverFromSelection => delete::select(Kind::Driver, &mut config)?,
-        Action::DeleteDrivers(ids) => delete::run(Kind::Driver, &mut config, &ids),
+        Action::DeleteDriver(id) => delete::run(Kind::Driver, &mut config, from_ref(&id)),
+        Action::DeleteAllDrivers(ids) => delete::run(Kind::Driver, &mut config, &ids),
     };
 
     if changed {

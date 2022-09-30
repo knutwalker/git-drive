@@ -53,7 +53,8 @@ pub struct ShowNav {
 #[derive(Debug)]
 pub enum Action {
     DriveFromSelection,
-    DriveWith(Vec<Id>),
+    DriveWith(Id),
+    DriveWithAll(Vec<Id>),
     DriveAlone,
     ListNavigators,
     ListDrivers,
@@ -61,14 +62,15 @@ pub enum Action {
     NewNavigator(PartialNav),
     EditNavigator(PartialNav),
     DeleteNavigatorFromSelection,
-    DeleteNavigators(Vec<Id>),
-
+    DeleteNavigator(Id),
+    DeleteAllNavigators(Vec<Id>),
     DriveAsFromSelection,
     DriveAs(Id),
     NewDriver(PartialNav),
     EditDriver(PartialNav),
     DeleteDriverFromSelection,
-    DeleteDrivers(Vec<Id>),
+    DeleteDriver(Id),
+    DeleteAllDrivers(Vec<Id>),
 }
 
 impl Deref for Id {

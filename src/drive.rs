@@ -30,15 +30,15 @@ pub(crate) fn current(
 pub(crate) fn select(config: &Config) -> Result<bool> {
     let currently = get_current().unwrap_or_default();
     let ids = ui::select_ids_from(Kind::Navigator, config, currently)?;
-    run(ids.into_iter(), config)
+    run(&ids, config)
 }
 
-pub(crate) fn run<A, I>(ids: I, config: &Config) -> Result<bool>
+pub(crate) fn run<I>(ids: &[I], config: &Config) -> Result<bool>
 where
-    A: IdRef,
-    I: ExactSizeIterator<Item = A>,
+    I: IdRef,
 {
     let navigators = ids
+        .iter()
         .map(|id| match_navigator(id.id(), config))
         .collect::<Result<Vec<_>>>()?;
 
