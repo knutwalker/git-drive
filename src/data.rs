@@ -33,7 +33,7 @@ pub enum Kind {
     Driver,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PartialNav {
     pub id: Option<String>,
     pub name: Option<String>,
@@ -41,33 +41,10 @@ pub struct PartialNav {
     pub key: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShowNav {
     pub color: String,
     pub fail_if_empty: bool,
-}
-
-#[derive(Debug)]
-pub enum Action {
-    DriveFromSelection,
-    DriveWith(Id),
-    DriveWithAll(Vec<Id>),
-    DriveAlone,
-    ListNavigators,
-    ListDrivers,
-    ShowCurrentNavigator(ShowNav),
-    NewNavigator(PartialNav),
-    EditNavigator(PartialNav),
-    DeleteNavigatorFromSelection,
-    DeleteNavigator(Id),
-    DeleteAllNavigators(Vec<Id>),
-    DriveAsFromSelection,
-    DriveAs(Id),
-    NewDriver(PartialNav),
-    EditDriver(PartialNav),
-    DeleteDriverFromSelection,
-    DeleteDriver(Id),
-    DeleteAllDrivers(Vec<Id>),
 }
 
 impl Deref for Id {
@@ -84,9 +61,9 @@ impl AsRef<str> for Id {
     }
 }
 
-impl From<&str> for Id {
-    fn from(v: &str) -> Self {
-        Id(v.to_string())
+impl<T: Into<String>> From<T> for Id {
+    fn from(value: T) -> Self {
+        Self(value.into())
     }
 }
 

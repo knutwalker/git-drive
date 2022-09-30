@@ -1,34 +1,91 @@
 use crate::{
-    data::{Action, Id, PartialNav, ShowNav},
+    data::{Id, PartialNav, ShowNav},
     Result,
 };
 use clap::{
     builder::ValueParser, AppSettings::DeriveDisplayOrder, Arg, ArgAction, ArgMatches, Command,
 };
+use std::ffi::OsString;
 
-pub(crate) fn print_help_stderr() -> std::io::Result<()> {
-    let mut out = std::io::stderr();
-    let mut app = Action::app();
-    app.write_long_help(&mut out)
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Action {
+    DriveFromSelection,
+    DriveWith(Id),
+    DriveWithAll(Vec<Id>),
+    DriveAlone,
+    ListNavigators,
+    ListDrivers,
+    ShowCurrentNavigator(ShowNav),
+    NewNavigator(PartialNav),
+    EditNavigator(PartialNav),
+    DeleteNavigatorFromSelection,
+    DeleteNavigator(Id),
+    DeleteAllNavigators(Vec<Id>),
+    DriveAsFromSelection,
+    DriveAs(Id),
+    NewDriver(PartialNav),
+    EditDriver(PartialNav),
+    DeleteDriverFromSelection,
+    DeleteDriver(Id),
+    DeleteAllDrivers(Vec<Id>),
 }
 
 pub(crate) fn action() -> Action {
     Action::parse()
 }
 
+pub(crate) fn print_help_stderr() -> std::io::Result<()> {
+    let mut app = Action::app();
+    let out = std::io::stderr();
+    let mut out = out.lock();
+    app.write_long_help(&mut out)
+}
+
 impl Action {
     fn parse() -> Self {
-        let mut app = Self::app();
-        let matches = app.get_matches_mut();
-        match Self::action_from_matches(matches) {
+        Self::parse_from(std::env::args_os())
+    }
+
+    fn parse_from<I>(args: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<OsString> + Clone,
+    {
+        match Self::try_parse_from(args) {
             Ok(action) => action,
-            Err(e) => {
-                // Since this is more of a development-time error,
-                // we aren't doing as fancy of a quit as `get_matches`
-                e.format(&mut app).exit()
+            Err((mut app, e)) => {
+                let e = e.format(&mut app);
+                drop(app);
+
+                if cfg!(test) {
+                    panic!("Clap returned an error:\n{0:#?}\n{0}", e);
+                } else {
+                    e.exit()
+                }
             }
         }
     }
+
+    fn try_parse_from<I>(args: I) -> Result<Self, (Command<'static>, clap::Error)>
+    where
+        I: IntoIterator,
+        I::Item: Into<OsString> + Clone,
+    {
+        #[cfg(test)]
+        let args =
+            std::iter::once(OsString::from("test-prog")).chain(args.into_iter().map(|s| s.into()));
+
+        let mut app = Self::app();
+        let matches = match app.try_get_matches_from_mut(args) {
+            Ok(matches) => matches,
+            Err(e) => return Err((app, e)),
+        };
+        match Self::action_from_matches(matches) {
+            Ok(action) => Ok(action),
+            Err(e) => Err((app, e)),
+        }
+    }
+
     fn app() -> Command<'static> {
         Command::new(env!("CARGO_PKG_NAME"))
             .version(env!("CARGO_PKG_VERSION"))
@@ -40,7 +97,7 @@ impl Action {
             .global_setting(DeriveDisplayOrder)
             .subcommand(
                 Command::new("with")
-                    .arg(Self::ids_arg().min_values(1))
+                    .arg(Self::ids_arg().required(true).min_values(1))
                     .about("Start driving with the specified navigator(s)"),
             )
             .subcommand(Command::new("alone").about("Start driving alone"))
@@ -60,7 +117,7 @@ impl Action {
                             .default_missing_value("cyan")
                             .default_value("none")
                             .value_parser(ValueParser::string())
-                            .action(ArgAction::StoreValue)
+                            .action(ArgAction::Set)
                             .help("The color in which to print the current navigators"),
                     )
                     .arg(
@@ -83,12 +140,12 @@ impl Action {
             )
             .subcommand(
                 Command::new("delete")
-                    .arg(Self::ids_arg().min_values(0))
+                    .arg(Self::ids_arg())
                     .about("Deletes navigator(s), either prompted for, or specified"),
             )
             .subcommand(
                 Command::new("as")
-                    .arg(Self::ids_arg().min_values(0).max_values(1))
+                    .arg(Self::ids_arg().max_values(1))
                     .about("Change driver seat"),
             )
             .subcommand(
@@ -108,17 +165,11 @@ impl Action {
                     )
                     .subcommand(
                         Command::new("delete")
-                            .arg(
-                                Self::ids_arg()
-                                    // .action(ArgAction::StoreValue)
-                                    // .multiple_values(false)
-                                    // .required(false)
-                                    .min_values(0)
-                                    .help("The drivers"),
-                            )
+                            .arg(Self::ids_arg().help("The drivers"))
                             .about("Deletes driver(s), either prompted for, or specified"),
                     )
-                    .setting(clap::AppSettings::SubcommandRequiredElseHelp)
+                    .subcommand_required(true)
+                    .arg_required_else_help(true)
                     .about("Operate on the driver instead of the navigator"),
             )
     }
@@ -130,7 +181,6 @@ impl Action {
             .multiple_values(true)
             .value_parser(ValueParser::string())
             .action(ArgAction::Append)
-            .required(true)
             .help("The navigators")
     }
 
@@ -141,7 +191,7 @@ impl Action {
             .value_name("KEY")
             .takes_value(true)
             .value_parser(ValueParser::string())
-            .action(ArgAction::StoreValue)
+            .action(ArgAction::Set)
             .help("The signing key to use")
     }
 
@@ -152,7 +202,7 @@ impl Action {
                 .value_name("AS")
                 .takes_value(true)
                 .value_parser(ValueParser::string())
-                .action(ArgAction::StoreValue)
+                .action(ArgAction::Set)
                 .help("The identifier to use for the author's entry")
                 .conflicts_with("alias"),
             Arg::new("name")
@@ -160,20 +210,20 @@ impl Action {
                 .value_name("NAME")
                 .takes_value(true)
                 .value_parser(ValueParser::string())
-                .action(ArgAction::StoreValue)
+                .action(ArgAction::Set)
                 .help("The author's name"),
             Arg::new("email")
                 .long("email")
                 .value_name("EMAIL")
                 .takes_value(true)
                 .value_parser(ValueParser::string())
-                .action(ArgAction::StoreValue)
+                .action(ArgAction::Set)
                 .help("The author's email"),
             Arg::new("alias")
                 .value_name("ALIAS")
                 .takes_value(true)
                 .value_parser(ValueParser::string())
-                .action(ArgAction::StoreValue)
+                .action(ArgAction::Set)
                 .help("The identifier to use for the author's entry")
                 .conflicts_with("as"),
         ]
@@ -269,5 +319,554 @@ fn fold_map<I: ExactSizeIterator<Item = String>, R>(
         Some(mut items) if items.len() == 1 => one(Id(items.next().unwrap())),
         None => empty,
         Some(items) => many(items.map(Id).collect()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::convert::identity;
+
+    use super::*;
+    use clap::ErrorKind;
+
+    #[test]
+    fn no_args_intiates_selection() {
+        let action = Action::parse_from(identity::<[&str; 0]>([]));
+        assert_eq!(action, Action::DriveFromSelection)
+    }
+
+    #[test]
+    fn with() {
+        let action = Action::parse_from(["with", "foo"]);
+        assert_eq!(action, Action::DriveWith(Id::from("foo")));
+
+        let action = Action::parse_from(["with", "foo", "bar"]);
+        assert_eq!(
+            action,
+            Action::DriveWithAll(vec![Id::from("foo"), Id::from("bar")])
+        );
+    }
+
+    #[test]
+    fn with_requires_at_least_one_id() {
+        let (_, err) = Action::try_parse_from(["with"]).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn alone() {
+        let action = Action::parse_from(["alone"]);
+        assert_eq!(action, Action::DriveAlone);
+    }
+
+    #[test]
+    fn list_navigators() {
+        let action = Action::parse_from(["list"]);
+        assert_eq!(action, Action::ListNavigators);
+    }
+
+    #[test]
+    fn list_drivers() {
+        let action = Action::parse_from(["list", "me"]);
+        assert_eq!(action, Action::ListDrivers);
+    }
+
+    #[test]
+    fn show_current() {
+        let action = Action::parse_from(["show"]);
+        assert_eq!(
+            action,
+            Action::ShowCurrentNavigator(ShowNav {
+                color: String::from("none"),
+                fail_if_empty: false
+            })
+        );
+    }
+
+    #[test]
+    fn show_current_color() {
+        let action = Action::parse_from(["show", "--color"]);
+        assert_eq!(
+            action,
+            Action::ShowCurrentNavigator(ShowNav {
+                color: String::from("cyan"),
+                fail_if_empty: false
+            })
+        );
+
+        let action = Action::parse_from(["show", "--color", "bold.red"]);
+        assert_eq!(
+            action,
+            Action::ShowCurrentNavigator(ShowNav {
+                color: String::from("bold.red"),
+                fail_if_empty: false
+            })
+        );
+    }
+
+    #[test]
+    fn show_current_fail() {
+        let action = Action::parse_from(["show", "--fail-if-empty"]);
+        assert_eq!(
+            action,
+            Action::ShowCurrentNavigator(ShowNav {
+                color: String::from("none"),
+                fail_if_empty: true
+            })
+        );
+    }
+
+    #[test]
+    fn new_navigator() {
+        let action = Action::parse_from(["new"]);
+        assert_eq!(
+            action,
+            Action::NewNavigator(PartialNav {
+                id: None,
+                name: None,
+                email: None,
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn new_navigator_as() {
+        let action = Action::parse_from(["new", "--as", "bernd"]);
+        assert_eq!(
+            action,
+            Action::NewNavigator(PartialNav {
+                id: Some(String::from("bernd")),
+                name: None,
+                email: None,
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn new_navigator_alias() {
+        let action = Action::parse_from(["new", "bernd"]);
+        assert_eq!(
+            action,
+            Action::NewNavigator(PartialNav {
+                id: Some(String::from("bernd")),
+                name: None,
+                email: None,
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn new_navigator_as_and_alias_are_mutually_exclusive() {
+        let (_, err) = Action::try_parse_from(["new", "bernd", "--as", "ronny"]).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn new_navigator_name() {
+        let action = Action::parse_from(["new", "--name", "foo"]);
+        assert_eq!(
+            action,
+            Action::NewNavigator(PartialNav {
+                id: None,
+                name: Some(String::from("foo")),
+                email: None,
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn new_navigator_email() {
+        let action = Action::parse_from(["new", "--email", "foo"]);
+        assert_eq!(
+            action,
+            Action::NewNavigator(PartialNav {
+                id: None,
+                name: None,
+                email: Some(String::from("foo")),
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn new_navigator_all_with_as() {
+        let action =
+            Action::parse_from(["new", "--as", "bernd", "--name", "foo", "--email", "bar"]);
+        assert_eq!(
+            action,
+            Action::NewNavigator(PartialNav {
+                id: Some(String::from("bernd")),
+                name: Some(String::from("foo")),
+                email: Some(String::from("bar")),
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn new_navigator_all_with_alias() {
+        let action = Action::parse_from(["new", "bernd", "--name", "foo", "--email", "bar"]);
+        assert_eq!(
+            action,
+            Action::NewNavigator(PartialNav {
+                id: Some(String::from("bernd")),
+                name: Some(String::from("foo")),
+                email: Some(String::from("bar")),
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn edit_navigator_name() {
+        let action = Action::parse_from(["edit", "--name", "foo"]);
+        assert_eq!(
+            action,
+            Action::EditNavigator(PartialNav {
+                id: None,
+                name: Some(String::from("foo")),
+                email: None,
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn edit_navigator_email() {
+        let action = Action::parse_from(["edit", "--email", "foo"]);
+        assert_eq!(
+            action,
+            Action::EditNavigator(PartialNav {
+                id: None,
+                name: None,
+                email: Some(String::from("foo")),
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn edit_navigator_all_with_as() {
+        let action =
+            Action::parse_from(["edit", "--as", "bernd", "--name", "foo", "--email", "bar"]);
+        assert_eq!(
+            action,
+            Action::EditNavigator(PartialNav {
+                id: Some(String::from("bernd")),
+                name: Some(String::from("foo")),
+                email: Some(String::from("bar")),
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn edit_navigator_all_with_alias() {
+        let action = Action::parse_from(["edit", "bernd", "--name", "foo", "--email", "bar"]);
+        assert_eq!(
+            action,
+            Action::EditNavigator(PartialNav {
+                id: Some(String::from("bernd")),
+                name: Some(String::from("foo")),
+                email: Some(String::from("bar")),
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn delete_initiates_navigator_selection() {
+        let action = Action::parse_from(["delete"]);
+        assert_eq!(action, Action::DeleteNavigatorFromSelection);
+    }
+
+    #[test]
+    fn delete_one_navigator_provided() {
+        let action = Action::parse_from(["delete", "foo"]);
+        assert_eq!(action, Action::DeleteNavigator(Id::from("foo")));
+    }
+
+    #[test]
+    fn delete_many_provided_navigators() {
+        let action = Action::parse_from(["delete", "foo", "bar"]);
+        assert_eq!(
+            action,
+            Action::DeleteAllNavigators(vec![Id::from("foo"), Id::from("bar")])
+        );
+    }
+
+    #[test]
+    fn as_initiates_selection() {
+        let action = Action::parse_from(["as"]);
+        assert_eq!(action, Action::DriveAsFromSelection);
+    }
+
+    #[test]
+    fn as_with_one_arg() {
+        let action = Action::parse_from(["as", "bernd"]);
+        assert_eq!(action, Action::DriveAs(Id::from("bernd")));
+    }
+
+    #[test]
+    fn as_only_accepts_one_arg() {
+        let (_, err) = Action::try_parse_from(["as", "bernd", "ronny"]).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::TooManyValues);
+    }
+
+    #[test]
+    fn list_drivers_from_me() {
+        let action = Action::parse_from(["me", "list"]);
+        assert_eq!(action, Action::ListDrivers);
+    }
+
+    #[test]
+    fn new_driver() {
+        let action = Action::parse_from(["me", "new"]);
+        assert_eq!(
+            action,
+            Action::NewDriver(PartialNav {
+                id: None,
+                name: None,
+                email: None,
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn new_driver_as() {
+        let action = Action::parse_from(["me", "new", "--as", "bernd"]);
+        assert_eq!(
+            action,
+            Action::NewDriver(PartialNav {
+                id: Some(String::from("bernd")),
+                name: None,
+                email: None,
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn new_driver_alias() {
+        let action = Action::parse_from(["me", "new", "bernd"]);
+        assert_eq!(
+            action,
+            Action::NewDriver(PartialNav {
+                id: Some(String::from("bernd")),
+                name: None,
+                email: None,
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn new_driver_as_and_alias_are_mutually_exclusive() {
+        let (_, err) = Action::try_parse_from(["me", "new", "bernd", "--as", "ronny"]).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn new_driver_name() {
+        let action = Action::parse_from(["me", "new", "--name", "foo"]);
+        assert_eq!(
+            action,
+            Action::NewDriver(PartialNav {
+                id: None,
+                name: Some(String::from("foo")),
+                email: None,
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn new_driver_email() {
+        let action = Action::parse_from(["me", "new", "--email", "foo"]);
+        assert_eq!(
+            action,
+            Action::NewDriver(PartialNav {
+                id: None,
+                name: None,
+                email: Some(String::from("foo")),
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn new_driver_key() {
+        let action = Action::parse_from(["me", "new", "--key", "foo"]);
+        assert_eq!(
+            action,
+            Action::NewDriver(PartialNav {
+                id: None,
+                name: None,
+                email: None,
+                key: Some(String::from("foo")),
+            })
+        )
+    }
+
+    #[test]
+    fn new_driver_all_with_as() {
+        let action = Action::parse_from([
+            "me", "new", "--as", "bernd", "--name", "foo", "--email", "bar", "--key", "baz",
+        ]);
+        assert_eq!(
+            action,
+            Action::NewDriver(PartialNav {
+                id: Some(String::from("bernd")),
+                name: Some(String::from("foo")),
+                email: Some(String::from("bar")),
+                key: Some(String::from("baz")),
+            })
+        )
+    }
+
+    #[test]
+    fn new_driver_all_with_alias() {
+        let action = Action::parse_from([
+            "me", "new", "bernd", "--name", "foo", "--email", "bar", "--key", "baz",
+        ]);
+        assert_eq!(
+            action,
+            Action::NewDriver(PartialNav {
+                id: Some(String::from("bernd")),
+                name: Some(String::from("foo")),
+                email: Some(String::from("bar")),
+                key: Some(String::from("baz")),
+            })
+        )
+    }
+
+    #[test]
+    fn edit_driver_name() {
+        let action = Action::parse_from(["me", "edit", "--name", "foo"]);
+        assert_eq!(
+            action,
+            Action::EditDriver(PartialNav {
+                id: None,
+                name: Some(String::from("foo")),
+                email: None,
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn edit_driver_email() {
+        let action = Action::parse_from(["me", "edit", "--email", "foo"]);
+        assert_eq!(
+            action,
+            Action::EditDriver(PartialNav {
+                id: None,
+                name: None,
+                email: Some(String::from("foo")),
+                key: None,
+            })
+        )
+    }
+
+    #[test]
+    fn edit_driver_key() {
+        let action = Action::parse_from(["me", "edit", "--key", "foo"]);
+        assert_eq!(
+            action,
+            Action::EditDriver(PartialNav {
+                id: None,
+                name: None,
+                email: None,
+                key: Some(String::from("foo")),
+            })
+        )
+    }
+
+    #[test]
+    fn edit_driver_all_with_as() {
+        let action = Action::parse_from([
+            "me", "edit", "--as", "bernd", "--name", "foo", "--email", "bar", "--key", "baz",
+        ]);
+        assert_eq!(
+            action,
+            Action::EditDriver(PartialNav {
+                id: Some(String::from("bernd")),
+                name: Some(String::from("foo")),
+                email: Some(String::from("bar")),
+                key: Some(String::from("baz")),
+            })
+        )
+    }
+
+    #[test]
+    fn edit_driver_all_with_alias() {
+        let action = Action::parse_from([
+            "me", "edit", "bernd", "--name", "foo", "--email", "bar", "--key", "baz",
+        ]);
+        assert_eq!(
+            action,
+            Action::EditDriver(PartialNav {
+                id: Some(String::from("bernd")),
+                name: Some(String::from("foo")),
+                email: Some(String::from("bar")),
+                key: Some(String::from("baz")),
+            })
+        )
+    }
+
+    #[test]
+    fn delete_initiates_driver_selection() {
+        let action = Action::parse_from(["me", "delete"]);
+        assert_eq!(action, Action::DeleteDriverFromSelection);
+    }
+
+    #[test]
+    fn delete_one_driver_provided() {
+        let action = Action::parse_from(["me", "delete", "foo"]);
+        assert_eq!(action, Action::DeleteDriver(Id::from("foo")));
+    }
+
+    #[test]
+    fn delete_many_provided_drivers() {
+        let action = Action::parse_from(["me", "delete", "foo", "bar"]);
+        assert_eq!(
+            action,
+            Action::DeleteAllDrivers(vec![Id::from("foo"), Id::from("bar")])
+        );
+    }
+
+    #[test]
+    fn version_flag() {
+        let (_, res) = Action::try_parse_from(["--version"]).unwrap_err();
+        assert_eq!(res.kind(), ErrorKind::DisplayVersion);
+    }
+
+    #[test]
+    fn short_version_flag() {
+        let (_, res) = Action::try_parse_from(["-V"]).unwrap_err();
+        assert_eq!(res.kind(), ErrorKind::DisplayVersion);
+    }
+
+    #[test]
+    fn help_flag() {
+        let (_, res) = Action::try_parse_from(["--help"]).unwrap_err();
+        assert_eq!(res.kind(), ErrorKind::DisplayHelp);
+    }
+
+    #[test]
+    fn short_help_flag() {
+        let (_, res) = Action::try_parse_from(["-h"]).unwrap_err();
+        assert_eq!(res.kind(), ErrorKind::DisplayHelp);
+    }
+
+    #[test]
+    fn help_command() {
+        let (_, res) = Action::try_parse_from(["help"]).unwrap_err();
+        assert_eq!(res.kind(), ErrorKind::DisplayHelp);
     }
 }

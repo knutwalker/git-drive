@@ -48,10 +48,7 @@ git drive as alias
 */
 #![warn(unused_crate_dependencies)]
 
-use crate::{
-    config::Config,
-    data::{Action, Kind},
-};
+use crate::{args::Action, config::Config, data::Kind};
 use console::style;
 use eyre::{bail, Result};
 use std::slice::from_ref;
