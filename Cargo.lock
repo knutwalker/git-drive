@@ -78,7 +78,8 @@ dependencies = [
 [[package]]
 name = "co-authors"
 version = "0.1.0"
-source = "git+https://github.com/s1ck/git-stats?branch=polish-api#08020fcc2db8e81021aefd05444a06904f6abb90"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c72bc82a7d41419b2bfdfc4058ecd60ebdbf113391ff80a3b2c89caeaa7576f"
 dependencies = [
  "nom",
 ]
