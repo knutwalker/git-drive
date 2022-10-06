@@ -286,14 +286,15 @@ impl Action {
     }
 
     fn partial_nav(mut matches: ArgMatches, key: bool) -> PartialNav {
-        PartialNav {
-            id: matches
-                .remove_one::<String>("as")
-                .or_else(|| matches.remove_one::<String>("alias")),
-            name: matches.remove_one::<String>("name"),
-            email: matches.remove_one::<String>("email"),
-            key: key.then(|| matches.remove_one::<String>("key")).flatten(),
-        }
+        PartialNav::default()
+            .with_id(
+                matches
+                    .remove_one::<String>("as")
+                    .or_else(|| matches.remove_one::<String>("alias")),
+            )
+            .with_name(matches.remove_one::<String>("name"))
+            .with_email(matches.remove_one::<String>("email"))
+            .with_key(key.then(|| matches.remove_one::<String>("key")).flatten())
     }
 
     fn unknown_command(name: &str) -> clap::Error {
@@ -414,15 +415,7 @@ mod tests {
     #[test]
     fn new_navigator() {
         let action = Action::parse_from(["new"]);
-        assert_eq!(
-            action,
-            Action::NewNavigator(PartialNav {
-                id: None,
-                name: None,
-                email: None,
-                key: None,
-            })
-        );
+        assert_eq!(action, Action::NewNavigator(PartialNav::default()));
     }
 
     #[test]
@@ -430,12 +423,7 @@ mod tests {
         let action = Action::parse_from(["new", "--as", "bernd"]);
         assert_eq!(
             action,
-            Action::NewNavigator(PartialNav {
-                id: Some(String::from("bernd")),
-                name: None,
-                email: None,
-                key: None,
-            })
+            Action::NewNavigator(PartialNav::default().with_id(String::from("bernd")))
         );
     }
 
@@ -444,12 +432,7 @@ mod tests {
         let action = Action::parse_from(["new", "bernd"]);
         assert_eq!(
             action,
-            Action::NewNavigator(PartialNav {
-                id: Some(String::from("bernd")),
-                name: None,
-                email: None,
-                key: None,
-            })
+            Action::NewNavigator(PartialNav::default().with_id(String::from("bernd")))
         );
     }
 
@@ -464,12 +447,7 @@ mod tests {
         let action = Action::parse_from(["new", "--name", "foo"]);
         assert_eq!(
             action,
-            Action::NewNavigator(PartialNav {
-                id: None,
-                name: Some(String::from("foo")),
-                email: None,
-                key: None,
-            })
+            Action::NewNavigator(PartialNav::default().with_name(String::from("foo")))
         );
     }
 
@@ -478,12 +456,7 @@ mod tests {
         let action = Action::parse_from(["new", "--email", "foo"]);
         assert_eq!(
             action,
-            Action::NewNavigator(PartialNav {
-                id: None,
-                name: None,
-                email: Some(String::from("foo")),
-                key: None,
-            })
+            Action::NewNavigator(PartialNav::default().with_email(String::from("foo")))
         );
     }
 
@@ -493,12 +466,12 @@ mod tests {
             Action::parse_from(["new", "--as", "bernd", "--name", "foo", "--email", "bar"]);
         assert_eq!(
             action,
-            Action::NewNavigator(PartialNav {
-                id: Some(String::from("bernd")),
-                name: Some(String::from("foo")),
-                email: Some(String::from("bar")),
-                key: None,
-            })
+            Action::NewNavigator(
+                PartialNav::default()
+                    .with_id(String::from("bernd"))
+                    .with_name(String::from("foo"))
+                    .with_email(String::from("bar"))
+            )
         );
     }
 
@@ -507,12 +480,12 @@ mod tests {
         let action = Action::parse_from(["new", "bernd", "--name", "foo", "--email", "bar"]);
         assert_eq!(
             action,
-            Action::NewNavigator(PartialNav {
-                id: Some(String::from("bernd")),
-                name: Some(String::from("foo")),
-                email: Some(String::from("bar")),
-                key: None,
-            })
+            Action::NewNavigator(
+                PartialNav::default()
+                    .with_id(String::from("bernd"))
+                    .with_name(String::from("foo"))
+                    .with_email(String::from("bar"))
+            )
         );
     }
 
@@ -521,12 +494,7 @@ mod tests {
         let action = Action::parse_from(["edit", "--name", "foo"]);
         assert_eq!(
             action,
-            Action::EditNavigator(PartialNav {
-                id: None,
-                name: Some(String::from("foo")),
-                email: None,
-                key: None,
-            })
+            Action::EditNavigator(PartialNav::default().with_name(String::from("foo")))
         );
     }
 
@@ -535,12 +503,7 @@ mod tests {
         let action = Action::parse_from(["edit", "--email", "foo"]);
         assert_eq!(
             action,
-            Action::EditNavigator(PartialNav {
-                id: None,
-                name: None,
-                email: Some(String::from("foo")),
-                key: None,
-            })
+            Action::EditNavigator(PartialNav::default().with_email(String::from("foo")))
         );
     }
 
@@ -550,12 +513,12 @@ mod tests {
             Action::parse_from(["edit", "--as", "bernd", "--name", "foo", "--email", "bar"]);
         assert_eq!(
             action,
-            Action::EditNavigator(PartialNav {
-                id: Some(String::from("bernd")),
-                name: Some(String::from("foo")),
-                email: Some(String::from("bar")),
-                key: None,
-            })
+            Action::EditNavigator(
+                PartialNav::default()
+                    .with_id(String::from("bernd"))
+                    .with_name(String::from("foo"))
+                    .with_email(String::from("bar"))
+            )
         );
     }
 
@@ -564,12 +527,12 @@ mod tests {
         let action = Action::parse_from(["edit", "bernd", "--name", "foo", "--email", "bar"]);
         assert_eq!(
             action,
-            Action::EditNavigator(PartialNav {
-                id: Some(String::from("bernd")),
-                name: Some(String::from("foo")),
-                email: Some(String::from("bar")),
-                key: None,
-            })
+            Action::EditNavigator(
+                PartialNav::default()
+                    .with_id(String::from("bernd"))
+                    .with_name(String::from("foo"))
+                    .with_email(String::from("bar"))
+            )
         );
     }
 
@@ -621,15 +584,7 @@ mod tests {
     #[test]
     fn new_driver() {
         let action = Action::parse_from(["me", "new"]);
-        assert_eq!(
-            action,
-            Action::NewDriver(PartialNav {
-                id: None,
-                name: None,
-                email: None,
-                key: None,
-            })
-        );
+        assert_eq!(action, Action::NewDriver(PartialNav::default()));
     }
 
     #[test]
@@ -637,12 +592,7 @@ mod tests {
         let action = Action::parse_from(["me", "new", "--as", "bernd"]);
         assert_eq!(
             action,
-            Action::NewDriver(PartialNav {
-                id: Some(String::from("bernd")),
-                name: None,
-                email: None,
-                key: None,
-            })
+            Action::NewDriver(PartialNav::default().with_id(String::from("bernd")))
         );
     }
 
@@ -651,12 +601,7 @@ mod tests {
         let action = Action::parse_from(["me", "new", "bernd"]);
         assert_eq!(
             action,
-            Action::NewDriver(PartialNav {
-                id: Some(String::from("bernd")),
-                name: None,
-                email: None,
-                key: None,
-            })
+            Action::NewDriver(PartialNav::default().with_id(String::from("bernd")))
         );
     }
 
@@ -671,12 +616,7 @@ mod tests {
         let action = Action::parse_from(["me", "new", "--name", "foo"]);
         assert_eq!(
             action,
-            Action::NewDriver(PartialNav {
-                id: None,
-                name: Some(String::from("foo")),
-                email: None,
-                key: None,
-            })
+            Action::NewDriver(PartialNav::default().with_name(String::from("foo")))
         );
     }
 
@@ -685,12 +625,7 @@ mod tests {
         let action = Action::parse_from(["me", "new", "--email", "foo"]);
         assert_eq!(
             action,
-            Action::NewDriver(PartialNav {
-                id: None,
-                name: None,
-                email: Some(String::from("foo")),
-                key: None,
-            })
+            Action::NewDriver(PartialNav::default().with_email(String::from("foo")))
         );
     }
 
@@ -699,12 +634,7 @@ mod tests {
         let action = Action::parse_from(["me", "new", "--key", "foo"]);
         assert_eq!(
             action,
-            Action::NewDriver(PartialNav {
-                id: None,
-                name: None,
-                email: None,
-                key: Some(String::from("foo")),
-            })
+            Action::NewDriver(PartialNav::default().with_key(String::from("foo")))
         );
     }
 
@@ -715,12 +645,13 @@ mod tests {
         ]);
         assert_eq!(
             action,
-            Action::NewDriver(PartialNav {
-                id: Some(String::from("bernd")),
-                name: Some(String::from("foo")),
-                email: Some(String::from("bar")),
-                key: Some(String::from("baz")),
-            })
+            Action::NewDriver(
+                PartialNav::default()
+                    .with_id(String::from("bernd"))
+                    .with_name(String::from("foo"))
+                    .with_email(String::from("bar"))
+                    .with_key(String::from("baz"))
+            )
         );
     }
 
@@ -731,12 +662,13 @@ mod tests {
         ]);
         assert_eq!(
             action,
-            Action::NewDriver(PartialNav {
-                id: Some(String::from("bernd")),
-                name: Some(String::from("foo")),
-                email: Some(String::from("bar")),
-                key: Some(String::from("baz")),
-            })
+            Action::NewDriver(
+                PartialNav::default()
+                    .with_id(String::from("bernd"))
+                    .with_name(String::from("foo"))
+                    .with_email(String::from("bar"))
+                    .with_key(String::from("baz"))
+            )
         );
     }
 
@@ -745,12 +677,7 @@ mod tests {
         let action = Action::parse_from(["me", "edit", "--name", "foo"]);
         assert_eq!(
             action,
-            Action::EditDriver(PartialNav {
-                id: None,
-                name: Some(String::from("foo")),
-                email: None,
-                key: None,
-            })
+            Action::EditDriver(PartialNav::default().with_name(String::from("foo")))
         );
     }
 
@@ -759,12 +686,7 @@ mod tests {
         let action = Action::parse_from(["me", "edit", "--email", "foo"]);
         assert_eq!(
             action,
-            Action::EditDriver(PartialNav {
-                id: None,
-                name: None,
-                email: Some(String::from("foo")),
-                key: None,
-            })
+            Action::EditDriver(PartialNav::default().with_email(String::from("foo")))
         );
     }
 
@@ -773,12 +695,7 @@ mod tests {
         let action = Action::parse_from(["me", "edit", "--key", "foo"]);
         assert_eq!(
             action,
-            Action::EditDriver(PartialNav {
-                id: None,
-                name: None,
-                email: None,
-                key: Some(String::from("foo")),
-            })
+            Action::EditDriver(PartialNav::default().with_key(String::from("foo")))
         );
     }
 
@@ -789,12 +706,13 @@ mod tests {
         ]);
         assert_eq!(
             action,
-            Action::EditDriver(PartialNav {
-                id: Some(String::from("bernd")),
-                name: Some(String::from("foo")),
-                email: Some(String::from("bar")),
-                key: Some(String::from("baz")),
-            })
+            Action::EditDriver(
+                PartialNav::default()
+                    .with_id(String::from("bernd"))
+                    .with_name(String::from("foo"))
+                    .with_email(String::from("bar"))
+                    .with_key(String::from("baz"))
+            )
         );
     }
 
@@ -805,12 +723,13 @@ mod tests {
         ]);
         assert_eq!(
             action,
-            Action::EditDriver(PartialNav {
-                id: Some(String::from("bernd")),
-                name: Some(String::from("foo")),
-                email: Some(String::from("bar")),
-                key: Some(String::from("baz")),
-            })
+            Action::EditDriver(
+                PartialNav::default()
+                    .with_id(String::from("bernd"))
+                    .with_name(String::from("foo"))
+                    .with_email(String::from("bar"))
+                    .with_key(String::from("baz"))
+            )
         );
     }
 

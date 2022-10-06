@@ -27,18 +27,48 @@ pub struct Driver {
     pub key: Option<String>,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Kind {
     Navigator,
     Driver,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PartialNav {
     pub id: Option<String>,
     pub name: Option<String>,
     pub email: Option<String>,
     pub key: Option<String>,
+}
+
+impl PartialNav {
+    pub fn with_id(self, id: impl Into<Option<String>>) -> Self {
+        Self {
+            id: id.into(),
+            ..self
+        }
+    }
+
+    pub fn with_name(self, name: impl Into<Option<String>>) -> Self {
+        Self {
+            name: name.into(),
+            ..self
+        }
+    }
+
+    pub fn with_email(self, email: impl Into<Option<String>>) -> Self {
+        Self {
+            email: email.into(),
+            ..self
+        }
+    }
+
+    pub fn with_key(self, key: impl Into<Option<String>>) -> Self {
+        Self {
+            key: key.into(),
+            ..self
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
