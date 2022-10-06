@@ -21,6 +21,62 @@ pub struct Config {
     pub drivers: Vec<Driver>,
 }
 
+impl FromIterator<Navigator> for Config {
+    fn from_iter<T: IntoIterator<Item = Navigator>>(iter: T) -> Self {
+        Self {
+            navigators: iter.into_iter().collect(),
+            drivers: Vec::new(),
+        }
+    }
+}
+
+impl FromIterator<Driver> for Config {
+    fn from_iter<T: IntoIterator<Item = Driver>>(iter: T) -> Self {
+        Self {
+            navigators: Vec::new(),
+            drivers: iter.into_iter().collect(),
+        }
+    }
+}
+
+#[cfg(test)]
+enum Entity {
+    Nav(Navigator),
+    Drv(Driver),
+}
+
+#[cfg(test)]
+impl Navigator {
+    const fn ent(self) -> Entity {
+        Entity::Nav(self)
+    }
+}
+
+#[cfg(test)]
+impl Driver {
+    const fn ent(self) -> Entity {
+        Entity::Drv(self)
+    }
+}
+
+#[cfg(test)]
+impl FromIterator<Entity> for Config {
+    fn from_iter<T: IntoIterator<Item = Entity>>(iter: T) -> Self {
+        let (mut navigators, mut drivers) = (Vec::new(), Vec::new());
+        for ent in iter {
+            match ent {
+                Entity::Nav(nav) => navigators.push(nav),
+                Entity::Drv(drv) => drivers.push(drv),
+            }
+        }
+
+        Self {
+            navigators,
+            drivers,
+        }
+    }
+}
+
 pub fn load() -> Result<Config> {
     let file = config_file(Mode::Read)?;
 
@@ -380,11 +436,7 @@ mod tests {
 
     #[test]
     fn serialize_empty_config() {
-        let config = Config {
-            navigators: vec![],
-            drivers: vec![],
-        };
-
+        let config = Config::default();
         let config = serialize_config(&config);
 
         assert_eq!(config, "version: 1\n");
@@ -392,11 +444,7 @@ mod tests {
 
     #[test]
     fn serialize_one_nav() {
-        let config = Config {
-            navigators: vec![nav1()],
-            drivers: vec![],
-        };
-
+        let config = Config::from_iter(Some(nav1()));
         let config = serialize_config(&config);
 
         assert_eq!(
@@ -411,11 +459,7 @@ mod tests {
 
     #[test]
     fn serialize_multiple_navs() {
-        let config = Config {
-            navigators: vec![nav1(), nav2()],
-            drivers: vec![],
-        };
-
+        let config = Config::from_iter([nav1(), nav2()]);
         let config = serialize_config(&config);
 
         assert_eq!(
@@ -432,11 +476,7 @@ mod tests {
 
     #[test]
     fn serialize_one_driver_without_key() {
-        let config = Config {
-            navigators: vec![],
-            drivers: vec![drv1(None)],
-        };
-
+        let config = Config::from_iter(Some(drv1(None)));
         let config = serialize_config(&config);
 
         assert_eq!(
@@ -452,11 +492,7 @@ mod tests {
 
     #[test]
     fn serialize_one_driver_with_key() {
-        let config = Config {
-            navigators: vec![],
-            drivers: vec![drv1("my-key.pub")],
-        };
-
+        let config = Config::from_iter(Some(drv1("my-key.pub")));
         let config = serialize_config(&config);
 
         assert_eq!(
@@ -472,11 +508,7 @@ mod tests {
 
     #[test]
     fn serialize_all() {
-        let config = Config {
-            navigators: vec![nav1(), nav2()],
-            drivers: vec![drv1("my-key.pub")],
-        };
-
+        let config = Config::from_iter([nav1().ent(), nav2().ent(), drv1("my-key.pub").ent()]);
         let config = serialize_config(&config);
 
         assert_eq!(
@@ -499,10 +531,7 @@ mod tests {
         let config = "version: 1\n";
         let config = deserialize_config(config).unwrap();
 
-        let expected = Config {
-            navigators: vec![],
-            drivers: vec![],
-        };
+        let expected = Config::default();
         assert_eq!(config, expected);
     }
 
@@ -515,10 +544,7 @@ mod tests {
         );
         let config = deserialize_config(config).unwrap();
 
-        let expected = Config {
-            navigators: vec![nav1()],
-            drivers: vec![],
-        };
+        let expected = Config::from_iter(Some(nav1()));
         assert_eq!(config, expected);
     }
 
@@ -533,10 +559,7 @@ mod tests {
         );
         let config = deserialize_config(config).unwrap();
 
-        let expected = Config {
-            navigators: vec![nav1(), nav2()],
-            drivers: vec![],
-        };
+        let expected = Config::from_iter([nav1(), nav2()]);
         assert_eq!(config, expected);
     }
 
@@ -550,10 +573,7 @@ mod tests {
         );
         let config = deserialize_config(config).unwrap();
 
-        let expected = Config {
-            navigators: vec![],
-            drivers: vec![drv1(None)],
-        };
+        let expected = Config::from_iter(Some(drv1(None)));
         assert_eq!(config, expected);
     }
 
@@ -567,10 +587,7 @@ mod tests {
         );
         let config = deserialize_config(config).unwrap();
 
-        let expected = Config {
-            navigators: vec![],
-            drivers: vec![drv1("my-key.pub")],
-        };
+        let expected = Config::from_iter(Some(drv1("my-key.pub")));
         assert_eq!(config, expected);
     }
 
@@ -588,10 +605,7 @@ mod tests {
         );
         let config = deserialize_config(config).unwrap();
 
-        let expected = Config {
-            navigators: vec![nav1(), nav2()],
-            drivers: vec![drv1("my-key.pub")],
-        };
+        let expected = Config::from_iter([nav1().ent(), nav2().ent(), drv1("my-key.pub").ent()]);
         assert_eq!(config, expected);
     }
 
@@ -802,10 +816,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let out = dir.child("out.txt");
 
-        let config = Config {
-            navigators: vec![nav1(), nav2()],
-            drivers: vec![drv1("my-key.pub")],
-        };
+        let config = Config::from_iter([nav1().ent(), nav2().ent(), drv1("my-key.pub").ent()]);
 
         store_in(&config, out.path()).unwrap();
 
