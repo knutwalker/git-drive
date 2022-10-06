@@ -29,7 +29,7 @@ pub fn current(
 
 pub fn select(config: &Config) -> Result<bool> {
     let currently = get_current().unwrap_or_default();
-    let ids = ui::select_ids_from(Kind::Navigator, config, &currently)?;
+    let ids = ui::select_ids_from(ui::ui(), Kind::Navigator, config, &currently)?;
     run(&ids, config)
 }
 

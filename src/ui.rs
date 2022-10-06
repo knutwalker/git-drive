@@ -1,265 +1,346 @@
+#![allow(clippy::needless_pass_by_value)]
+
 use crate::{
     config::Config,
-    data::{Driver, Id, Kind, Navigator, PartialNav},
+    data::{Driver, Id, IdRef, Kind, Navigator, PartialNav},
     Result,
 };
-use console::{style, Style, StyledObject};
-use dialoguer::{theme::ColorfulTheme, theme::Theme, Input, MultiSelect, Select, Validator};
-use eyre::eyre;
-use once_cell::sync::Lazy;
-use std::{fmt, marker::PhantomData, option::Option};
+use validation::{AsciiOnly, CheckForEmpty, Lookup, Validator};
+
+mod tui;
+mod validation;
+
+pub trait SelectOne {
+    fn select_one(&mut self, kind: Kind, items: &[Selectable<'_>]) -> Result<usize>;
+}
+
+pub trait SelectMany {
+    fn select_many(&mut self, kind: Kind, items: &[Selectable<'_>]) -> Result<Vec<usize>>;
+}
+
+pub trait PromptText {
+    fn prompt_for_text<V: Validator>(
+        &mut self,
+        thing: &'static str,
+        id: &str,
+        initial: Option<String>,
+        validator: V,
+    ) -> Result<String>;
+}
+
+pub trait PromptAlias {
+    fn prompt_for_alias<V: Validator>(&mut self, kind: Kind, validator: V) -> Result<String>;
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct Selectable<'a> {
+    item: &'a str,
+    checked: bool,
+}
+
+pub fn complete_new_nav(
+    mut ui: impl PromptAlias + PromptText + Sized,
+    partial: PartialNav,
+    config: &Config,
+) -> Result<Navigator> {
+    ui.complete_new_nav(partial, config)
+}
+
+pub fn complete_existing_nav(
+    mut ui: impl PromptAlias + PromptText + Sized,
+    partial: PartialNav,
+    config: &Config,
+) -> Result<Navigator> {
+    ui.complete_existing_nav(partial, config)
+}
+
+pub fn complete_new_drv(
+    mut ui: impl PromptAlias + PromptText + Sized,
+    partial: PartialNav,
+    config: &Config,
+) -> Result<Driver> {
+    ui.complete_new_drv(partial, config)
+}
+
+pub fn complete_existing_drv(
+    mut ui: impl PromptAlias + PromptText + Sized,
+    partial: PartialNav,
+    config: &Config,
+) -> Result<Driver> {
+    ui.complete_existing_drv(partial, config)
+}
+
+pub fn select_id_from(
+    mut ui: impl SelectOne,
+    kind: Kind,
+    config: &Config,
+) -> Result<Option<&'_ Id>> {
+    ui.select_id_from(kind, config)
+}
 
 pub fn select_ids_from<'config>(
+    mut ui: impl SelectMany,
     kind: Kind,
     config: &'config Config,
     pre_selected: &[Id],
 ) -> Result<Vec<&'config Id>> {
-    let selection = select_from(kind, config, pre_selected)?;
-    let ids = match kind {
+    ui.select_ids_from(kind, config, pre_selected)
+}
+
+pub fn ui() -> impl SelectOne + SelectMany + PromptText + PromptAlias + Sized {
+    tui::ConsoleUi
+}
+
+impl<'a, T: SelectOne> SelectOne for &'a mut T {
+    fn select_one(&mut self, kind: Kind, items: &[Selectable<'_>]) -> Result<usize> {
+        T::select_one(self, kind, items)
+    }
+}
+
+impl<'a, T: SelectMany> SelectMany for &'a mut T {
+    fn select_many(&mut self, kind: Kind, items: &[Selectable<'_>]) -> Result<Vec<usize>> {
+        T::select_many(self, kind, items)
+    }
+}
+
+impl<'a, T: PromptText> PromptText for &'a mut T {
+    fn prompt_for_text<V: Validator>(
+        &mut self,
+        thing: &'static str,
+        id: &str,
+        initial: Option<String>,
+        validator: V,
+    ) -> Result<String> {
+        T::prompt_for_text(self, thing, id, initial, validator)
+    }
+}
+
+impl<'a, T: PromptAlias> PromptAlias for &'a mut T {
+    fn prompt_for_alias<V: Validator>(&mut self, kind: Kind, validator: V) -> Result<String> {
+        T::prompt_for_alias(self, kind, validator)
+    }
+}
+
+trait SelectOneExt: SelectOne {
+    fn select_id_from<'config>(
+        &mut self,
+        kind: Kind,
+        config: &'config Config,
+    ) -> Result<Option<&'config Id>> {
+        let selectables = selectable_items(kind, config, &[]);
+        if selectables.is_empty() {
+            return Ok(None);
+        }
+
+        let chosen = self.select_one(kind, &selectables)?;
+
+        let nav = match kind {
+            Kind::Navigator => config.navigators.get(chosen).map(IdRef::id),
+            Kind::Driver => config.drivers.get(chosen).map(IdRef::id),
+        };
+        Ok(nav)
+    }
+}
+
+impl<T: SelectOne> SelectOneExt for T {}
+
+trait SelectManyExt: SelectMany {
+    fn select_ids_from<'config>(
+        &mut self,
+        kind: Kind,
+        config: &'config Config,
+        pre_selected: &[Id],
+    ) -> Result<Vec<&'config Id>> {
+        let selectable = selectable_items(kind, config, pre_selected);
+        if selectable.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let selection = self.select_many(kind, &selectable)?;
+
+        let ids = match kind {
+            Kind::Navigator => selection
+                .into_iter()
+                .filter_map(|idx| config.navigators.get(idx))
+                .map(IdRef::id)
+                .collect(),
+            Kind::Driver => selection
+                .into_iter()
+                .filter_map(|idx| config.drivers.get(idx))
+                .map(IdRef::id)
+                .collect(),
+        };
+        Ok(ids)
+    }
+}
+
+impl<T: SelectMany> SelectManyExt for T {}
+
+fn selectable_items<'config>(
+    kind: Kind,
+    config: &'config Config,
+    pre_select: &[Id],
+) -> Vec<Selectable<'config>> {
+    match kind {
         Kind::Navigator => config
             .navigators
             .iter()
-            .enumerate()
-            .filter_map(|(idx, nav)| {
-                if selection.contains(&idx) {
-                    Some(&nav.alias)
-                } else {
-                    None
-                }
+            .map(|nav| Selectable {
+                item: &nav.alias,
+                checked: pre_select.contains(&nav.alias),
             })
             .collect(),
         Kind::Driver => config
             .drivers
             .iter()
-            .enumerate()
-            .filter_map(|(idx, drv)| {
-                if selection.contains(&idx) {
-                    Some(&drv.navigator.alias)
-                } else {
-                    None
-                }
+            .map(|drv| Selectable {
+                item: &drv.navigator.alias,
+                checked: pre_select.contains(&drv.navigator.alias),
             })
             .collect(),
-    };
-    Ok(ids)
-}
-
-fn select_from(kind: Kind, config: &Config, pre_select: &[Id]) -> Result<Vec<usize>> {
-    let mut ms = MultiSelect::with_theme(&*THEME);
-    ms.with_prompt(format!(
-        "Select any number {}(s)\n  Use [space] to select, [return] to confirm",
-        kind
-    ));
-    match kind {
-        Kind::Navigator => {
-            if config.navigators.is_empty() {
-                return Ok(Vec::new());
-            }
-            for nav in &config.navigators {
-                ms.item_checked(&*nav.alias, pre_select.contains(&nav.alias));
-            }
-        }
-        Kind::Driver => {
-            if config.drivers.is_empty() {
-                return Ok(Vec::new());
-            }
-            for drv in &config.drivers {
-                ms.item_checked(
-                    &*drv.navigator.alias,
-                    pre_select.contains(&drv.navigator.alias),
-                );
-            }
-        }
-    }
-
-    let chosen = ms.interact()?;
-    Ok(chosen)
-}
-
-pub fn select_id_from(kind: Kind, config: &Config) -> Result<Id> {
-    let mut select = Select::with_theme(&*THEME);
-    select.with_prompt(format!(
-        "Select one {}\n  Use arrows to select, [return] to confirm",
-        kind
-    ));
-
-    match kind {
-        Kind::Navigator => {
-            for nav in &config.navigators {
-                select.item(&*nav.alias);
-            }
-        }
-        Kind::Driver => {
-            for drv in &config.drivers {
-                select.item(&*drv.navigator.alias);
-            }
-        }
-    }
-    let chosen = select.interact()?;
-    let id = match kind {
-        Kind::Navigator => &config.navigators[chosen],
-        Kind::Driver => &config.drivers[chosen].navigator,
-    };
-    let id = id.alias.as_ref().to_string();
-    Ok(Id(id))
-}
-
-pub fn prompt_for_empty(
-    thing: &'static str,
-    id: &str,
-    initial: Option<String>,
-    allow_empty: bool,
-) -> Result<String> {
-    let mut input = Input::<String>::with_theme(&*THEME);
-    input
-        .with_prompt(format!("The {} for {}\n", thing, style(id).cyan()))
-        .allow_empty(true)
-        .validate_with(CheckForEmpty::new(thing, allow_empty));
-    if let Some(initial) = initial {
-        input.with_initial_text(initial);
-    }
-    let name = input.interact()?;
-    Ok(name)
-}
-
-pub fn prompt_for(thing: &'static str, id: &str, initial: Option<String>) -> Result<String> {
-    prompt_for_empty(thing, id, initial, false)
-}
-
-pub fn complete_new_nav(partial: PartialNav, config: &Config) -> Result<Navigator> {
-    complete_nav(CheckMode::MustNotExist, partial, config)
-}
-
-pub fn complete_existing_nav(partial: PartialNav, config: &Config) -> Result<Navigator> {
-    complete_nav(CheckMode::MustExist, partial, config)
-}
-
-pub fn complete_new_drv(partial: PartialNav, config: &Config) -> Result<Driver> {
-    complete_drv(CheckMode::MustNotExist, partial, config)
-}
-
-pub fn complete_existing_drv(partial: PartialNav, config: &Config) -> Result<Driver> {
-    complete_drv(CheckMode::MustExist, partial, config)
-}
-
-fn prompt_alias<T: Seat + Copy>(
-    check: CheckMode,
-    config: &Config,
-    existing: Option<String>,
-) -> Result<(Id, Option<&'_ T::Entity>)> {
-    let mut lookup = Lookup::<T>::new(config, check);
-    let id = if let Some(id) = existing {
-        lookup.validate(&id)?;
-        Id(id)
-    } else {
-        let input = Input::<String>::with_theme(&*THEME)
-                .with_prompt(format!("Please enter the alias for the {}.\n  The alias will be used as identifier for all other commands.\n", T::kind()))
-                .allow_empty(true)
-                .validate_with(CheckForEmpty::new("alias", false))
-                .validate_with(lookup)
-                .interact_text()?;
-        Id(input)
-    };
-
-    let existing = lookup.matching_navigator(&id);
-    Ok((id, existing))
-}
-
-fn complete_nav(check: CheckMode, new: PartialNav, config: &Config) -> Result<Navigator> {
-    let PartialNav {
-        id,
-        name,
-        email,
-        key: _,
-    } = new;
-
-    let (alias, existing) = prompt_alias::<NavigatorSeat>(check, config, id)?;
-    finish_nav(alias, name, email, existing)
-}
-
-fn finish_nav(
-    alias: Id,
-    name: Option<String>,
-    email: Option<String>,
-    existing: Option<&Navigator>,
-) -> Result<Navigator> {
-    let name = prompt_for(
-        "name",
-        &alias,
-        name.or_else(|| existing.map(|n| n.name.clone())),
-    )?;
-    let email = prompt_for(
-        "email",
-        &alias,
-        email.or_else(|| existing.map(|n| n.email.clone())),
-    )?;
-
-    Ok(Navigator { alias, name, email })
-}
-
-fn complete_drv(check: CheckMode, new: PartialNav, config: &Config) -> Result<Driver> {
-    let PartialNav {
-        id,
-        name,
-        email,
-        key,
-    } = new;
-
-    let (alias, existing) = prompt_alias::<DriverSeat>(check, config, id)?;
-    let navigator = finish_nav(alias, name, email, existing.map(|d| &d.navigator))?;
-
-    let key = prompt_for_empty(
-        "signing key",
-        &navigator.alias,
-        key.or_else(|| existing.and_then(|d| d.key.clone())),
-        true,
-    )?;
-    let key = if key.is_empty() { None } else { Some(key) };
-
-    Ok(Driver { navigator, key })
-}
-
-#[derive(Copy, Clone, Debug)]
-enum MsgTemplate {
-    MustNotBeEmpty,
-    EnterANonEmptyName,
-}
-
-#[derive(Copy, Clone, Debug)]
-struct CheckForEmpty {
-    messages: [MsgTemplate; 2],
-    entity: &'static str,
-    allow_empty: bool,
-}
-
-impl CheckForEmpty {
-    const fn new(entity: &'static str, allow_empty: bool) -> Self {
-        Self {
-            messages: [MsgTemplate::MustNotBeEmpty, MsgTemplate::EnterANonEmptyName],
-            entity,
-            allow_empty,
-        }
     }
 }
 
-impl Validator<String> for CheckForEmpty {
-    type Err = String;
+trait PromptTextExt: PromptText + Sized {
+    fn prompt_for(
+        &mut self,
+        thing: &'static str,
+        id: &str,
+        initial: Option<String>,
+    ) -> Result<String> {
+        let validator = CheckForEmpty::new(thing);
+        let result = self.prompt_for_text(thing, id, initial, &validator)?;
+        (&validator).validate(&result)?;
 
-    fn validate(&mut self, input: &String) -> Result<(), Self::Err> {
-        if self.allow_empty || !input.trim().is_empty() {
-            return Ok(());
-        }
+        Ok(result)
+    }
 
-        let tpl = self.messages[0];
-        self.messages.rotate_left(1);
+    fn finish_nav(
+        &mut self,
+        alias: Id,
+        name: Option<String>,
+        email: Option<String>,
+        existing: Option<&Navigator>,
+    ) -> Result<Navigator> {
+        let name = self.prompt_for(
+            "name",
+            &alias,
+            name.or_else(|| existing.map(|n| n.name.clone())),
+        )?;
+        let email = self.prompt_for(
+            "email",
+            &alias,
+            email.or_else(|| existing.map(|n| n.email.clone())),
+        )?;
 
-        let msg = match tpl {
-            MsgTemplate::MustNotBeEmpty => format!("The {} must not be empty", self.entity),
-            MsgTemplate::EnterANonEmptyName => format!("Please enter a non-empty {}", self.entity),
+        Ok(Navigator { alias, name, email })
+    }
+
+    fn finish_drv(
+        &mut self,
+        alias: Id,
+        name: Option<String>,
+        email: Option<String>,
+        key: Option<String>,
+        existing: Option<&Driver>,
+    ) -> Result<Driver> {
+        let navigator = self.finish_nav(alias, name, email, existing.map(|d| &d.navigator))?;
+
+        let key = self.prompt_for_text(
+            "signing key",
+            &navigator.alias,
+            key.or_else(|| existing.and_then(|d| d.key.clone())),
+            &CheckForEmpty::new("signing key").with_allow_empty(true),
+        )?;
+
+        let key = if key.is_empty() { None } else { Some(key) };
+
+        Ok(Driver { navigator, key })
+    }
+}
+
+impl<T: PromptText + Sized> PromptTextExt for T {}
+
+trait PromptAliasExt: PromptAlias + PromptText + Sized {
+    fn prompt_alias<'config, T: Seat + Copy>(
+        &mut self,
+        check: CheckMode,
+        config: &'config Config,
+        existing: Option<String>,
+    ) -> Result<(Id, Option<&'config T::Entity>)> {
+        let check_empty = CheckForEmpty::new("alias");
+        let lookup = Lookup::<T>::new(config, check);
+        let validator = AsciiOnly.and_then(lookup);
+        let mut validator = (&check_empty).and_then(validator);
+
+        let id = match existing {
+            Some(id) => Id(id),
+            None => Id(self.prompt_for_alias(T::kind(), validator)?),
         };
 
-        Err(msg)
+        validator.validate(&id.0)?;
+
+        let existing = lookup.matching_navigator(&id);
+        Ok((id, existing))
     }
+
+    fn complete_nav(
+        &mut self,
+        check: CheckMode,
+        new: PartialNav,
+        config: &Config,
+    ) -> Result<Navigator> {
+        let PartialNav {
+            id,
+            name,
+            email,
+            key: _,
+        } = new;
+
+        let (alias, existing) = self.prompt_alias::<NavigatorSeat>(check, config, id)?;
+        self.finish_nav(alias, name, email, existing)
+    }
+
+    fn complete_drv(
+        &mut self,
+        check: CheckMode,
+        new: PartialNav,
+        config: &Config,
+    ) -> Result<Driver> {
+        let PartialNav {
+            id,
+            name,
+            email,
+            key,
+        } = new;
+
+        let (alias, existing) = self.prompt_alias::<DriverSeat>(check, config, id)?;
+        self.finish_drv(alias, name, email, key, existing)
+    }
+
+    fn complete_new_nav(&mut self, partial: PartialNav, config: &Config) -> Result<Navigator> {
+        self.complete_nav(CheckMode::MustNotExist, partial, config)
+    }
+
+    fn complete_existing_nav(&mut self, partial: PartialNav, config: &Config) -> Result<Navigator> {
+        self.complete_nav(CheckMode::MustExist, partial, config)
+    }
+
+    fn complete_new_drv(&mut self, partial: PartialNav, config: &Config) -> Result<Driver> {
+        self.complete_drv(CheckMode::MustNotExist, partial, config)
+    }
+
+    fn complete_existing_drv(&mut self, partial: PartialNav, config: &Config) -> Result<Driver> {
+        self.complete_drv(CheckMode::MustExist, partial, config)
+    }
+}
+
+impl<T: PromptAlias + PromptText + Sized> PromptAliasExt for T {}
+
+#[derive(Copy, Clone)]
+enum CheckMode {
+    MustNotExist,
+    MustExist,
 }
 
 trait Seat {
@@ -300,218 +381,775 @@ impl Seat for NavigatorSeat {
     }
 }
 
-#[derive(Copy, Clone)]
-enum CheckMode {
-    MustNotExist,
-    MustExist,
-}
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
 
-#[derive(Copy, Clone)]
-struct Lookup<'a, T> {
-    config: &'a Config,
-    check: CheckMode,
-    _kind: PhantomData<T>,
-}
+    use super::*;
 
-impl<'a, T: Seat> Lookup<'a, T> {
-    const fn new(config: &'a Config, check: CheckMode) -> Self {
-        Self {
-            config,
-            check,
-            _kind: PhantomData,
+    impl<A: PromptText, B> PromptText for (A, B) {
+        fn prompt_for_text<V: Validator>(
+            &mut self,
+            thing: &'static str,
+            id: &str,
+            initial: Option<String>,
+            validator: V,
+        ) -> Result<String> {
+            self.0.prompt_for_text(thing, id, initial, validator)
         }
     }
 
-    fn matching_navigator(&self, id: &str) -> Option<&'a T::Entity> {
-        T::find(self.config, id)
-    }
-}
-
-impl<T: Seat> Validator<String> for Lookup<'_, T> {
-    type Err = eyre::Report;
-
-    fn validate(&mut self, input: &String) -> Result<(), Self::Err> {
-        let input = input.as_str();
-        let id_exists = self.matching_navigator(input).is_some();
-        match self.check {
-            CheckMode::MustNotExist => {
-                if id_exists {
-                    return Err(eyre!("Alias {} already exists", style(input).cyan()));
-                }
-            }
-            CheckMode::MustExist => {
-                if !id_exists {
-                    return Err(eyre!("Alias {} does not exist", style(input).cyan()));
-                }
-            }
+    impl<A, B: PromptAlias> PromptAlias for (A, B) {
+        fn prompt_for_alias<V: Validator>(&mut self, kind: Kind, validator: V) -> Result<String> {
+            self.1.prompt_for_alias(kind, validator)
         }
-
-        Ok(())
-    }
-}
-
-static THEME: Lazy<PrettyTheme> = Lazy::new(|| PrettyTheme {
-    theme: ColorfulTheme {
-        defaults_style: Style::new().for_stderr().cyan(),
-        prompt_style: Style::new().for_stderr().bold(),
-        prompt_prefix: style("?".to_string()).for_stderr().yellow(),
-        prompt_suffix: style("❯".to_string()).for_stderr().cyan(),
-        success_prefix: style("✔".to_string()).for_stderr().green(),
-        success_suffix: style(String::new()).for_stderr().green().dim(),
-        error_prefix: style("✘ ".to_string()).for_stderr().red(),
-        error_style: Style::new().for_stderr().red(),
-        hint_style: Style::new().for_stderr().cyan().dim(),
-        values_style: Style::new().for_stderr().green(),
-        active_item_style: Style::new().for_stderr().cyan(),
-        inactive_item_style: Style::new().for_stderr(),
-        active_item_prefix: style("❯".to_string()).for_stderr().cyan(),
-        inactive_item_prefix: style(" ".to_string()).for_stderr(),
-        checked_item_prefix: style("[✔]".to_string()).for_stderr().green(),
-        unchecked_item_prefix: style("[ ]".to_string()).for_stderr(),
-        picked_item_prefix: style(" ❯".to_string()).for_stderr().green(),
-        unpicked_item_prefix: style("  ".to_string()).for_stderr(),
-        inline_selections: true,
-    },
-    active_and_checked_item_prefix: style("[✔]".to_string()).for_stderr().cyan(),
-});
-
-struct PrettyTheme {
-    theme: ColorfulTheme,
-    active_and_checked_item_prefix: StyledObject<String>,
-}
-
-impl Theme for PrettyTheme {
-    fn format_prompt(&self, f: &mut dyn fmt::Write, prompt: &str) -> fmt::Result {
-        Theme::format_prompt(&self.theme, f, prompt)
     }
 
-    fn format_error(&self, f: &mut dyn fmt::Write, err: &str) -> fmt::Result {
-        Theme::format_error(&self.theme, f, err)
+    #[derive(Copy, Clone, Debug)]
+    struct FromFn<F>(F);
+
+    impl<F> SelectOne for FromFn<F>
+    where
+        F: FnMut(Kind, &[Selectable<'_>]) -> Result<usize>,
+    {
+        fn select_one(&mut self, kind: Kind, items: &[Selectable<'_>]) -> Result<usize> {
+            (self.0)(kind, items)
+        }
     }
 
-    fn format_confirm_prompt(
-        &self,
-        f: &mut dyn fmt::Write,
-        prompt: &str,
-        default: Option<bool>,
-    ) -> fmt::Result {
-        Theme::format_confirm_prompt(&self.theme, f, prompt, default)
+    impl<F> SelectMany for FromFn<F>
+    where
+        F: FnMut(Kind, &[Selectable<'_>]) -> Result<Vec<usize>>,
+    {
+        fn select_many(&mut self, kind: Kind, items: &[Selectable<'_>]) -> Result<Vec<usize>> {
+            (self.0)(kind, items)
+        }
     }
 
-    fn format_confirm_prompt_selection(
-        &self,
-        f: &mut dyn fmt::Write,
-        prompt: &str,
-        selection: Option<bool>,
-    ) -> fmt::Result {
-        Theme::format_confirm_prompt_selection(&self.theme, f, prompt, selection)
+    impl<F> PromptText for FromFn<F>
+    where
+        F: FnMut(&'static str, &str, Option<String>) -> Result<String>,
+    {
+        fn prompt_for_text<V: Validator>(
+            &mut self,
+            thing: &'static str,
+            id: &str,
+            initial: Option<String>,
+            _validator: V,
+        ) -> Result<String> {
+            (self.0)(thing, id, initial)
+        }
     }
 
-    fn format_input_prompt(
-        &self,
-        f: &mut dyn fmt::Write,
-        prompt: &str,
-        default: Option<&str>,
-    ) -> fmt::Result {
-        Theme::format_input_prompt(&self.theme, f, prompt, default)
+    impl<F> PromptAlias for FromFn<F>
+    where
+        F: FnMut(Kind) -> Result<String>,
+    {
+        fn prompt_for_alias<V: Validator>(&mut self, kind: Kind, _validator: V) -> Result<String> {
+            (self.0)(kind)
+        }
     }
 
-    fn format_input_prompt_selection(
-        &self,
-        f: &mut dyn fmt::Write,
-        prompt: &str,
-        sel: &str,
-    ) -> fmt::Result {
-        Theme::format_input_prompt_selection(&self.theme, f, prompt, sel)
+    const fn select_one<F>(f: F) -> FromFn<F>
+    where
+        F: FnMut(Kind, &[Selectable<'_>]) -> Result<usize>,
+    {
+        FromFn(f)
     }
 
-    fn format_select_prompt(&self, f: &mut dyn fmt::Write, prompt: &str) -> fmt::Result {
-        write!(f, "  {}", self.theme.prompt_style.apply_to(prompt))
+    const fn select_many<F>(f: F) -> FromFn<F>
+    where
+        F: FnMut(Kind, &[Selectable<'_>]) -> Result<Vec<usize>>,
+    {
+        FromFn(f)
     }
 
-    fn format_select_prompt_selection(
-        &self,
-        f: &mut dyn fmt::Write,
-        prompt: &str,
-        sel: &str,
-    ) -> fmt::Result {
-        Theme::format_select_prompt_selection(&self.theme, f, prompt, sel)
+    const fn prompt_text<F>(f: F) -> FromFn<F>
+    where
+        F: FnMut(&'static str, &str, Option<String>) -> Result<String>,
+    {
+        FromFn(f)
     }
 
-    fn format_multi_select_prompt(&self, f: &mut dyn fmt::Write, prompt: &str) -> fmt::Result {
-        write!(f, "  {}", self.theme.prompt_style.apply_to(prompt))
+    const fn prompt_alias<F>(f: F) -> FromFn<F>
+    where
+        F: FnMut(Kind) -> Result<String>,
+    {
+        FromFn(f)
     }
 
-    fn format_sort_prompt(&self, f: &mut dyn fmt::Write, prompt: &str) -> fmt::Result {
-        Theme::format_sort_prompt(&self.theme, f, prompt)
+    struct NoUi;
+
+    #[allow(unused)]
+    impl SelectOne for NoUi {
+        fn select_one(&mut self, kind: Kind, items: &[Selectable<'_>]) -> Result<usize> {
+            panic!("Unexpected call to select_one kind={kind} items={items:?}")
+        }
     }
 
-    fn format_multi_select_prompt_selection(
-        &self,
-        f: &mut dyn fmt::Write,
-        prompt: &str,
-        selections: &[&str],
-    ) -> fmt::Result {
-        Theme::format_multi_select_prompt_selection(&self.theme, f, prompt, selections)
+    impl SelectMany for NoUi {
+        fn select_many(&mut self, kind: Kind, items: &[Selectable<'_>]) -> Result<Vec<usize>> {
+            panic!("Unexpected call to select_many kind={kind} items={items:?}")
+        }
     }
 
-    fn format_sort_prompt_selection(
-        &self,
-        f: &mut dyn fmt::Write,
-        prompt: &str,
-        selections: &[&str],
-    ) -> fmt::Result {
-        Theme::format_sort_prompt_selection(&self.theme, f, prompt, selections)
+    impl PromptText for NoUi {
+        fn prompt_for_text<V: Validator>(
+            &mut self,
+            thing: &'static str,
+            id: &str,
+            initial: Option<String>,
+            _validator: V,
+        ) -> Result<String> {
+            panic!(
+                "Unexpected call to prompt_for_text with thing={thing} id={id} initial={initial:?}"
+            )
+        }
     }
 
-    fn format_select_prompt_item(
-        &self,
-        f: &mut dyn fmt::Write,
-        text: &str,
-        active: bool,
-    ) -> fmt::Result {
-        Theme::format_select_prompt_item(&self.theme, f, text, active)
+    impl PromptAlias for NoUi {
+        fn prompt_for_alias<V: Validator>(&mut self, kind: Kind, _validator: V) -> Result<String> {
+            panic!("Unexpected call to prompt_for_text with kind={kind}")
+        }
     }
 
-    fn format_multi_select_prompt_item(
-        &self,
-        f: &mut dyn fmt::Write,
-        text: &str,
-        checked: bool,
-        active: bool,
-    ) -> fmt::Result {
-        let (active, checked, text) = match (active, checked) {
-            (true, true) => (
-                &self.theme.active_item_prefix,
-                &self.active_and_checked_item_prefix,
-                self.theme.active_item_style.apply_to(text),
-            ),
-            (true, false) => (
-                &self.theme.active_item_prefix,
-                &self.theme.unchecked_item_prefix,
-                self.theme.active_item_style.apply_to(text),
-            ),
-            (false, true) => (
-                &self.theme.inactive_item_prefix,
-                &self.theme.checked_item_prefix,
-                self.theme.values_style.apply_to(text),
-            ),
-            (false, false) => (
-                &self.theme.inactive_item_prefix,
-                &self.theme.unchecked_item_prefix,
-                self.theme.inactive_item_style.apply_to(text),
-            ),
-        };
-        write!(f, "{} {} {}", active, checked, text)
+    struct ColorGuard(bool);
+
+    impl Drop for ColorGuard {
+        fn drop(&mut self) {
+            console::set_colors_enabled(self.0);
+        }
     }
 
-    fn format_sort_prompt_item(
-        &self,
-        f: &mut dyn fmt::Write,
-        text: &str,
-        picked: bool,
-        active: bool,
-    ) -> fmt::Result {
-        Theme::format_sort_prompt_item(&self.theme, f, text, picked, active)
+    fn disable_colors() -> impl Drop {
+        let colors = console::colors_enabled();
+        console::set_colors_enabled(false);
+        ColorGuard(colors)
+    }
+
+    fn nav1() -> Navigator {
+        Navigator {
+            alias: Id::from("nav1"),
+            name: String::from("foo"),
+            email: String::from("bar"),
+        }
+    }
+
+    fn nav2() -> Navigator {
+        Navigator {
+            alias: Id::from("nav2"),
+            name: String::from("foo"),
+            email: String::from("bar"),
+        }
+    }
+
+    fn drv1(key: impl Into<Option<&'static str>>) -> Driver {
+        Driver {
+            navigator: Navigator {
+                alias: Id::from("drv1"),
+                name: String::from("ralle"),
+                email: String::from("qux@bar.org"),
+            },
+            key: key.into().map(String::from),
+        }
+    }
+
+    #[test]
+    fn test_select_id_with_empty_options() {
+        let config = Config::default();
+
+        let selected = select_id_from(NoUi, Kind::Navigator, &config).unwrap();
+        assert_eq!(selected, None);
+
+        let selected = select_id_from(NoUi, Kind::Driver, &config).unwrap();
+        assert_eq!(selected, None);
+    }
+
+    #[test]
+    fn test_select_id() {
+        let config = Config::from_iter([nav1(), nav2()]);
+        let ui = select_one(|kind, items| {
+            assert_eq!(kind, Kind::Navigator);
+            assert_eq!(items.len(), 2);
+            assert_eq!(items[0].item, "nav1");
+            assert_eq!(items[0].checked, false);
+            assert_eq!(items[1].item, "nav2");
+            assert_eq!(items[1].checked, false);
+            Ok(0)
+        });
+
+        let selected = select_id_from(ui, Kind::Navigator, &config).unwrap();
+
+        assert_eq!(selected, Some(config.navigators[0].id()));
+    }
+
+    #[test]
+    fn test_select_out_of_bounds() {
+        let config = Config::from_iter([nav1()]);
+        let ui = select_one(|_, _| Ok(usize::MAX));
+
+        let selected = select_id_from(ui, Kind::Navigator, &config).unwrap();
+
+        assert_eq!(selected, None);
+    }
+
+    #[test]
+    fn test_select_ids_with_empty_options() {
+        let config = Config::default();
+
+        let selected = select_ids_from(NoUi, Kind::Navigator, &config, &[]).unwrap();
+        assert_eq!(selected, Vec::<&Id>::new());
+
+        let selected = select_ids_from(NoUi, Kind::Driver, &config, &[]).unwrap();
+        assert_eq!(selected, Vec::<&Id>::new());
+    }
+
+    #[test]
+    fn test_select_ids() {
+        let config = Config::from_iter([nav1(), nav2()]);
+
+        let ui = select_many(|kind, items| {
+            assert_eq!(kind, Kind::Navigator);
+            assert_eq!(items.len(), 2);
+            assert_eq!(items[0].item, "nav1");
+            assert_eq!(items[1].item, "nav2");
+            assert_eq!(items[0].checked, false);
+            assert_eq!(items[1].checked, true);
+            Ok(vec![0, 1])
+        });
+
+        let selected =
+            select_ids_from(ui, Kind::Navigator, &config, &[nav2().id().clone()]).unwrap();
+
+        assert_eq!(selected, vec![nav1().id(), nav2().id()]);
+    }
+
+    #[test]
+    fn test_select_ids_keeps_selection_order() {
+        let config = Config::from_iter([nav1(), nav2()]);
+        let ui = select_many(|_, _| Ok(vec![1, 0]));
+
+        let selected = select_ids_from(ui, Kind::Navigator, &config, &[]).unwrap();
+
+        assert_eq!(selected, vec![nav2().id(), nav1().id()]);
+    }
+
+    #[test]
+    fn test_select_ids_out_of_bounds() {
+        let config = Config::from_iter([nav1(), nav2()]);
+        let ui = select_many(|_, _| Ok(vec![usize::MAX, usize::MAX - 1, usize::MAX - 2]));
+
+        let selected = select_ids_from(ui, Kind::Navigator, &config, &[]).unwrap();
+
+        assert_eq!(selected, Vec::<&Id>::new());
+    }
+
+    #[test]
+    fn complete_new_nav_with_no_input() {
+        let ask_for = Cell::new("alias");
+
+        let text = prompt_text(|thing, id, initial| {
+            assert_eq!(thing, ask_for.get());
+            assert_eq!(id, "alias");
+            assert_eq!(initial.as_deref(), None);
+
+            ask_for.set(match ask_for.get() {
+                "name" => "email",
+                "email" => "done",
+                what => panic!("Unexpected thing: {what}"),
+            });
+
+            Ok(String::from(thing))
+        });
+
+        let alias = prompt_alias(|kind| {
+            assert_eq!(kind, Kind::Navigator);
+            assert_eq!(ask_for.get(), "alias");
+            ask_for.set("name");
+            Ok(String::from("alias"))
+        });
+
+        let nav =
+            complete_new_nav((text, alias), PartialNav::default(), &Config::default()).unwrap();
+
+        assert_eq!(ask_for.get(), "done");
+        assert_eq!(nav.alias.0, "alias");
+        assert_eq!(nav.name, "name");
+        assert_eq!(nav.email, "email");
+    }
+
+    #[test]
+    fn complete_new_nav_with_name() {
+        let ask_for = Cell::new("alias");
+
+        let text = prompt_text(|thing, id, initial| {
+            assert_eq!(thing, ask_for.get());
+            assert_eq!(id, "alias");
+
+            ask_for.set(match ask_for.get() {
+                "name" => {
+                    assert_eq!(initial.as_deref(), Some("some name"));
+                    "email"
+                }
+                "email" => {
+                    assert_eq!(initial.as_deref(), None);
+                    "done"
+                }
+                what => panic!("Unexpected thing: {what}"),
+            });
+
+            Ok(String::from(thing))
+        });
+
+        let alias = prompt_alias(|kind| {
+            assert_eq!(kind, Kind::Navigator);
+            assert_eq!(ask_for.get(), "alias");
+            ask_for.set("name");
+            Ok(String::from("alias"))
+        });
+
+        let nav = complete_new_nav(
+            (text, alias),
+            PartialNav::default().with_name(String::from("some name")),
+            &Config::default(),
+        )
+        .unwrap();
+        assert_eq!(ask_for.get(), "done");
+        assert_eq!(nav.alias.0, "alias");
+        assert_eq!(nav.name, "name");
+        assert_eq!(nav.email, "email");
+    }
+
+    #[test]
+    fn complete_new_nav_id_validation() {
+        let alias = Cell::new("nav1");
+
+        let prompt = prompt_alias(|kind| {
+            assert_eq!(kind, Kind::Navigator);
+            Ok(String::from(alias.get()))
+        });
+
+        let _guard = disable_colors();
+
+        let err = complete_new_nav(
+            (NoUi, prompt),
+            PartialNav::default(),
+            &Config::from_iter([nav1()]),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert_eq!(err, "Alias nav1 already exists.");
+
+        alias.set("");
+
+        let err = complete_new_nav((NoUi, prompt), PartialNav::default(), &Config::default())
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(err, "The alias must not be empty.");
+
+        alias.set("Sörën");
+
+        let err = complete_new_nav((NoUi, prompt), PartialNav::default(), &Config::default())
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(err, "The input must be ASCII only.");
+    }
+
+    #[test]
+    fn complete_existing_nav_with_no_input() {
+        let ask_for = Cell::new("alias");
+        let navigator = nav1();
+
+        let text = prompt_text(|thing, id, initial| {
+            assert_eq!(thing, ask_for.get());
+            assert_eq!(id, navigator.id().as_ref());
+
+            Ok(match ask_for.get() {
+                "name" => {
+                    assert_eq!(initial.as_deref(), Some(navigator.name.as_str()));
+                    ask_for.set("email");
+                    navigator.name.clone()
+                }
+                "email" => {
+                    assert_eq!(initial.as_deref(), Some(navigator.email.as_str()));
+                    ask_for.set("done");
+                    navigator.email.clone()
+                }
+                what => panic!("Unexpected thing: {what}"),
+            })
+        });
+
+        let alias = prompt_alias(|kind| {
+            assert_eq!(kind, Kind::Navigator);
+            assert_eq!(ask_for.get(), "alias");
+            ask_for.set("name");
+            Ok(navigator.alias.0.clone())
+        });
+
+        let config = Config::from_iter([nav1()]);
+
+        let nav = complete_existing_nav((text, alias), PartialNav::default(), &config).unwrap();
+        assert_eq!(ask_for.get(), "done");
+        assert_eq!(nav, navigator);
+    }
+
+    #[test]
+    fn complete_existing_nav_with_name() {
+        let ask_for = Cell::new("alias");
+        let navigator = nav1();
+
+        let text = prompt_text(|thing, id, initial| {
+            assert_eq!(thing, ask_for.get());
+            assert_eq!(id, navigator.id().as_ref());
+
+            Ok(match ask_for.get() {
+                "name" => {
+                    assert_eq!(initial.as_deref(), Some("some name"));
+                    ask_for.set("email");
+                    navigator.name.clone()
+                }
+                "email" => {
+                    assert_eq!(initial.as_deref(), Some(navigator.email.as_str()));
+                    ask_for.set("done");
+                    navigator.email.clone()
+                }
+                what => panic!("Unexpected thing: {what}"),
+            })
+        });
+
+        let alias = prompt_alias(|kind| {
+            assert_eq!(kind, Kind::Navigator);
+            assert_eq!(ask_for.get(), "alias");
+            ask_for.set("name");
+            Ok(navigator.alias.0.clone())
+        });
+
+        let config = Config::from_iter([nav1()]);
+
+        let nav = complete_existing_nav(
+            (text, alias),
+            PartialNav::default().with_name(String::from("some name")),
+            &config,
+        )
+        .unwrap();
+        assert_eq!(ask_for.get(), "done");
+        assert_eq!(nav, navigator);
+    }
+
+    #[test]
+    fn complete_existing_nav_id_validation() {
+        let alias = Cell::new("nav2");
+
+        let prompt = prompt_alias(|kind| {
+            assert_eq!(kind, Kind::Navigator);
+            Ok(String::from(alias.get()))
+        });
+
+        let _guard = disable_colors();
+
+        let err = complete_existing_nav(
+            (NoUi, prompt),
+            PartialNav::default(),
+            &Config::from_iter([nav1()]),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert_eq!(err, "Alias nav2 does not exist.");
+
+        alias.set("");
+
+        let err = complete_existing_nav((NoUi, prompt), PartialNav::default(), &Config::default())
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(err, "The alias must not be empty.");
+
+        alias.set("Sörën");
+
+        let err = complete_existing_nav((NoUi, prompt), PartialNav::default(), &Config::default())
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(err, "The input must be ASCII only.");
+    }
+
+    #[test]
+    fn complete_new_drv_with_no_input() {
+        let ask_for = Cell::new("alias");
+
+        let text = prompt_text(|thing, id, initial| {
+            assert_eq!(thing, ask_for.get());
+            assert_eq!(initial.as_deref(), None);
+            assert_eq!(id, "alias");
+
+            ask_for.set(match ask_for.get() {
+                "name" => "email",
+                "email" => "signing key",
+                "signing key" => "done",
+                what => panic!("Unexpected thing: {what}"),
+            });
+
+            Ok(String::from(thing))
+        });
+
+        let alias = prompt_alias(|kind| {
+            assert_eq!(kind, Kind::Driver);
+            assert_eq!(ask_for.get(), "alias");
+            ask_for.set("name");
+            Ok(String::from("alias"))
+        });
+
+        let drv =
+            complete_new_drv((text, alias), PartialNav::default(), &Config::default()).unwrap();
+        assert_eq!(ask_for.get(), "done");
+        assert_eq!(drv.navigator.alias.0, "alias");
+        assert_eq!(drv.navigator.name, "name");
+        assert_eq!(drv.navigator.email, "email");
+        assert_eq!(drv.key.as_deref(), Some("signing key"));
+    }
+
+    #[test]
+    fn complete_new_drv_with_name() {
+        let ask_for = Cell::new("alias");
+
+        let text = prompt_text(|thing, id, initial| {
+            assert_eq!(thing, ask_for.get());
+            assert_eq!(id, "alias");
+
+            ask_for.set(match ask_for.get() {
+                "name" => {
+                    assert_eq!(initial.as_deref(), Some("some name"));
+                    "email"
+                }
+                "email" => {
+                    assert_eq!(initial.as_deref(), None);
+                    "signing key"
+                }
+                "signing key" => {
+                    assert_eq!(initial.as_deref(), None);
+                    "done"
+                }
+                what => panic!("Unexpected thing: {what}"),
+            });
+
+            Ok(String::from(thing))
+        });
+
+        let alias = prompt_alias(|kind| {
+            assert_eq!(kind, Kind::Driver);
+            assert_eq!(ask_for.get(), "alias");
+            ask_for.set("name");
+            Ok(String::from("alias"))
+        });
+
+        let drv = complete_new_drv(
+            (text, alias),
+            PartialNav::default().with_name(String::from("some name")),
+            &Config::default(),
+        )
+        .unwrap();
+        assert_eq!(ask_for.get(), "done");
+        assert_eq!(drv.navigator.alias.0, "alias");
+        assert_eq!(drv.navigator.name, "name");
+        assert_eq!(drv.navigator.email, "email");
+        assert_eq!(drv.key.as_deref(), Some("signing key"));
+    }
+
+    #[test]
+    fn complete_new_drv_empty_key_is_none() {
+        let text = prompt_text(|thing, _id, _initial| match thing {
+            "signing key" => Ok(String::new()),
+            otherwise => Ok(String::from(otherwise)),
+        });
+
+        let alias = prompt_alias(|_kind| Ok(String::from("alias")));
+
+        let drv =
+            complete_new_drv((text, alias), PartialNav::default(), &Config::default()).unwrap();
+
+        assert_eq!(drv.key, None);
+    }
+
+    #[test]
+    fn complete_new_drv_id_validation() {
+        let alias = Cell::new("drv1");
+
+        let prompt = prompt_alias(|kind| {
+            assert_eq!(kind, Kind::Driver);
+            Ok(String::from(alias.get()))
+        });
+
+        let _guard = disable_colors();
+
+        let config = Config::from_iter([drv1(None)]);
+
+        let err = complete_new_drv((NoUi, prompt), PartialNav::default(), &config)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(err, "Alias drv1 already exists.");
+
+        alias.set("");
+
+        let err = complete_new_drv((NoUi, prompt), PartialNav::default(), &config)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(err, "The alias must not be empty.");
+
+        alias.set("Sörën");
+
+        let err = complete_new_drv((NoUi, prompt), PartialNav::default(), &config)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(err, "The input must be ASCII only.");
+    }
+
+    #[test]
+    fn complete_existing_drv_with_no_input() {
+        let ask_for = Cell::new("alias");
+        let driver = drv1("a key");
+
+        let text = prompt_text(|thing, id, initial| {
+            assert_eq!(thing, ask_for.get());
+            assert_eq!(id, driver.id().as_ref());
+
+            Ok(match ask_for.get() {
+                "name" => {
+                    assert_eq!(initial.as_deref(), Some(driver.navigator.name.as_str()));
+                    ask_for.set("email");
+                    driver.navigator.name.clone()
+                }
+                "email" => {
+                    assert_eq!(initial.as_deref(), Some(driver.navigator.email.as_str()));
+                    ask_for.set("signing key");
+                    driver.navigator.email.clone()
+                }
+                "signing key" => {
+                    assert_eq!(initial.as_deref(), driver.key.as_deref());
+                    ask_for.set("done");
+                    driver.key.clone().unwrap_or_default()
+                }
+                what => panic!("Unexpected thing: {what}"),
+            })
+        });
+
+        let alias = prompt_alias(|kind| {
+            assert_eq!(kind, Kind::Driver);
+            assert_eq!(ask_for.get(), "alias");
+            ask_for.set("name");
+            Ok(driver.navigator.alias.0.clone())
+        });
+
+        let config = Config::from_iter([driver.clone()]);
+
+        let drv = complete_existing_drv((text, alias), PartialNav::default(), &config).unwrap();
+        assert_eq!(ask_for.get(), "done");
+        assert_eq!(drv, driver);
+    }
+
+    #[test]
+    fn complete_existing_drv_with_name() {
+        let ask_for = Cell::new("alias");
+        let driver = drv1("a key");
+
+        let text = prompt_text(|thing, id, initial| {
+            assert_eq!(thing, ask_for.get());
+            assert_eq!(id, driver.id().as_ref());
+
+            Ok(match ask_for.get() {
+                "name" => {
+                    assert_eq!(initial.as_deref(), Some("some name"));
+                    ask_for.set("email");
+                    driver.navigator.name.clone()
+                }
+                "email" => {
+                    assert_eq!(initial.as_deref(), Some(driver.navigator.email.as_str()));
+                    ask_for.set("signing key");
+                    driver.navigator.email.clone()
+                }
+                "signing key" => {
+                    assert_eq!(initial.as_deref(), driver.key.as_deref());
+                    ask_for.set("done");
+                    driver.key.clone().unwrap_or_default()
+                }
+                what => panic!("Unexpected thing: {what}"),
+            })
+        });
+
+        let alias = prompt_alias(|kind| {
+            assert_eq!(kind, Kind::Driver);
+            assert_eq!(ask_for.get(), "alias");
+            ask_for.set("name");
+            Ok(driver.navigator.alias.0.clone())
+        });
+
+        let config = Config::from_iter([driver.clone()]);
+
+        let drv = complete_existing_drv(
+            (text, alias),
+            PartialNav::default().with_name(String::from("some name")),
+            &config,
+        )
+        .unwrap();
+        assert_eq!(ask_for.get(), "done");
+        assert_eq!(drv, driver);
+    }
+
+    #[test]
+    fn complete_existing_drv_empty_key_is_none() {
+        let text = prompt_text(|thing, _id, _initial| match thing {
+            "signing key" => Ok(String::new()),
+            otherwise => Ok(String::from(otherwise)),
+        });
+
+        let alias = prompt_alias(|_kind| Ok(String::from("drv1")));
+
+        let config = Config::from_iter([drv1(None)]);
+
+        let drv = complete_existing_drv((text, alias), PartialNav::default(), &config).unwrap();
+
+        assert_eq!(drv.key, None);
+    }
+
+    #[test]
+    fn complete_existing_drv_id_validation() {
+        let alias = Cell::new("drv2");
+
+        let prompt = prompt_alias(|kind| {
+            assert_eq!(kind, Kind::Driver);
+            Ok(String::from(alias.get()))
+        });
+
+        let _guard = disable_colors();
+
+        let config = Config::from_iter([drv1(None)]);
+
+        let err = complete_existing_drv((NoUi, prompt), PartialNav::default(), &config)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(err, "Alias drv2 does not exist.");
+
+        alias.set("");
+
+        let err = complete_existing_drv((NoUi, prompt), PartialNav::default(), &config)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(err, "The alias must not be empty.");
+
+        alias.set("Sörën");
+
+        let err = complete_existing_drv((NoUi, prompt), PartialNav::default(), &config)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(err, "The input must be ASCII only.");
     }
 }

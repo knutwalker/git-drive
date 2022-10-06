@@ -1,6 +1,6 @@
 use std::{borrow::Borrow, fmt, ops::Deref};
 
-#[derive(Debug, Default, PartialEq, Eq, Clone)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Id(pub String);
 

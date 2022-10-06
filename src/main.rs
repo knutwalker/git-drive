@@ -81,7 +81,7 @@ git drive as alias
     unused,
     while_true
 )]
-#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::module_name_repetitions, clippy::bool_assert_comparison)]
 
 use crate::{args::Action, config::Config, data::Kind};
 use console::style;
@@ -190,11 +190,11 @@ mod new {
     pub fn run(kind: Kind, config: &mut Config, partial: PartialNav) -> Result<bool> {
         match kind {
             Kind::Navigator => {
-                let navigator = ui::complete_new_nav(partial, config)?;
+                let navigator = ui::complete_new_nav(ui::ui(), partial, config)?;
                 config.navigators.push(navigator);
             }
             Kind::Driver => {
-                let driver = ui::complete_new_drv(partial, config)?;
+                let driver = ui::complete_new_drv(ui::ui(), partial, config)?;
                 config.drivers.push(driver);
             }
         }
@@ -212,24 +212,19 @@ mod edit {
 
     pub fn run(kind: Kind, config: &mut Config, mut new: PartialNav) -> Result<bool> {
         if new.id.is_none() {
-            match kind {
-                Kind::Navigator => {
-                    if config.navigators.is_empty() {
-                        bail!("No navigators to edit")
-                    }
+            let id = ui::select_id_from(ui::ui(), kind, config)?;
+            match id {
+                Some(id) => {
+                    new.id = Some(id.0.clone());
                 }
-                Kind::Driver => {
-                    if config.drivers.is_empty() {
-                        bail!("No drivers to edit")
-                    }
+                None => {
+                    bail!("No {}s to edit", kind)
                 }
             }
-            let id = ui::select_id_from(kind, config)?;
-            new.id = Some(id.0);
         }
         match kind {
             Kind::Navigator => {
-                let navigator = ui::complete_existing_nav(new, config)?;
+                let navigator = ui::complete_existing_nav(ui::ui(), new, config)?;
                 let nav = config
                     .navigators
                     .iter_mut()
@@ -238,7 +233,7 @@ mod edit {
                 *nav = navigator;
             }
             Kind::Driver => {
-                let driver = ui::complete_existing_drv(new, config)?;
+                let driver = ui::complete_existing_drv(ui::ui(), new, config)?;
                 let drv = config
                     .drivers
                     .iter_mut()
@@ -259,7 +254,7 @@ mod delete {
     };
 
     pub fn select(kind: Kind, config: &mut Config) -> Result<bool> {
-        let ids: Vec<Id> = ui::select_ids_from(kind, config, &[])?
+        let ids: Vec<Id> = ui::select_ids_from(ui::ui(), kind, config, &[])?
             .into_iter()
             .cloned()
             .collect();
