@@ -78,18 +78,6 @@ enum MsgTemplate {
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-pub struct AsciiOnly;
-
-impl Validator for AsciiOnly {
-    fn validate(&mut self, input: &str) -> Result<()> {
-        if !input.is_ascii() {
-            bail!("The input must be ASCII only.")
-        }
-        Ok(())
-    }
-}
-
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Combined<A, B>(A, B);
 
 impl<A, B> Validator for Combined<A, B>

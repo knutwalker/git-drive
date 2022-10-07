@@ -5,7 +5,7 @@ use crate::{
     data::{Driver, Id, IdRef, Kind, Navigator, PartialNav},
     Result,
 };
-use validation::{AsciiOnly, CheckForEmpty, Lookup, Validator};
+use validation::{CheckForEmpty, Lookup, Validator};
 
 mod tui;
 mod validation;
@@ -270,8 +270,7 @@ trait PromptAliasExt: PromptAlias + PromptText + Sized {
     ) -> Result<(Id, Option<&'config T::Entity>)> {
         let check_empty = CheckForEmpty::new("alias");
         let lookup = Lookup::<T>::new(config, check);
-        let validator = AsciiOnly.and_then(lookup);
-        let mut validator = (&check_empty).and_then(validator);
+        let mut validator = (&check_empty).and_then(lookup);
 
         let id = match existing {
             Some(id) => Id(id),
@@ -721,14 +720,6 @@ mod tests {
             .to_string();
 
         assert_eq!(err, "The alias must not be empty.");
-
-        alias.set("Sörën");
-
-        let err = complete_new_nav((NoUi, prompt), PartialNav::default(), &Config::default())
-            .unwrap_err()
-            .to_string();
-
-        assert_eq!(err, "The input must be ASCII only.");
     }
 
     #[test]
@@ -840,14 +831,6 @@ mod tests {
             .to_string();
 
         assert_eq!(err, "The alias must not be empty.");
-
-        alias.set("Sörën");
-
-        let err = complete_existing_nav((NoUi, prompt), PartialNav::default(), &Config::default())
-            .unwrap_err()
-            .to_string();
-
-        assert_eq!(err, "The input must be ASCII only.");
     }
 
     #[test]
@@ -973,14 +956,6 @@ mod tests {
             .to_string();
 
         assert_eq!(err, "The alias must not be empty.");
-
-        alias.set("Sörën");
-
-        let err = complete_new_drv((NoUi, prompt), PartialNav::default(), &config)
-            .unwrap_err()
-            .to_string();
-
-        assert_eq!(err, "The input must be ASCII only.");
     }
 
     #[test]
@@ -1116,13 +1091,5 @@ mod tests {
             .to_string();
 
         assert_eq!(err, "The alias must not be empty.");
-
-        alias.set("Sörën");
-
-        let err = complete_existing_drv((NoUi, prompt), PartialNav::default(), &config)
-            .unwrap_err()
-            .to_string();
-
-        assert_eq!(err, "The input must be ASCII only.");
     }
 }
