@@ -139,3 +139,35 @@ impl Borrow<str> for &Navigator {
         &self.alias
     }
 }
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+
+    pub fn nav1() -> Navigator {
+        Navigator {
+            alias: Id::from("nav1"),
+            name: String::from("bernd"),
+            email: String::from("foo@bar.org"),
+        }
+    }
+
+    pub fn nav2() -> Navigator {
+        Navigator {
+            alias: Id::from("nav2"),
+            name: String::from("ronny"),
+            email: String::from("baz@bar.org"),
+        }
+    }
+
+    pub fn drv1(key: impl Into<Option<&'static str>>) -> Driver {
+        Driver {
+            navigator: Navigator {
+                alias: Id::from("drv1"),
+                name: String::from("ralle"),
+                email: String::from("qux@bar.org"),
+            },
+            key: key.into().map(String::from),
+        }
+    }
+}

@@ -383,9 +383,9 @@ impl Seat for NavigatorSeat {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
-
     use super::*;
+    use crate::data::tests::{drv1, nav1, nav2};
+    use std::cell::Cell;
 
     impl<A: PromptText, B> PromptText for (A, B) {
         fn prompt_for_text<V: Validator>(
@@ -525,33 +525,6 @@ mod tests {
         let colors = console::colors_enabled();
         console::set_colors_enabled(false);
         ColorGuard(colors)
-    }
-
-    fn nav1() -> Navigator {
-        Navigator {
-            alias: Id::from("nav1"),
-            name: String::from("foo"),
-            email: String::from("bar"),
-        }
-    }
-
-    fn nav2() -> Navigator {
-        Navigator {
-            alias: Id::from("nav2"),
-            name: String::from("foo"),
-            email: String::from("bar"),
-        }
-    }
-
-    fn drv1(key: impl Into<Option<&'static str>>) -> Driver {
-        Driver {
-            navigator: Navigator {
-                alias: Id::from("drv1"),
-                name: String::from("ralle"),
-                email: String::from("qux@bar.org"),
-            },
-            key: key.into().map(String::from),
-        }
     }
 
     #[test]
