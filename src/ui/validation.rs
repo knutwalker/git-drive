@@ -100,7 +100,7 @@ pub(super) struct Lookup<'config, T> {
 }
 
 impl<'config, T: Seat> Lookup<'config, T> {
-    pub const fn new(config: &'config Config, check: CheckMode) -> Self {
+    pub fn new(config: &'config Config, check: CheckMode) -> Self {
         Self {
             config,
             check,

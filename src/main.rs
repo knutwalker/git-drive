@@ -81,7 +81,11 @@ git drive as alias
     unused,
     while_true
 )]
-#![allow(clippy::module_name_repetitions, clippy::bool_assert_comparison)]
+#![allow(
+    clippy::module_name_repetitions,
+    clippy::bool_assert_comparison,
+    clippy::missing_const_for_fn
+)]
 
 use crate::{args::Action, config::Config, data::Kind};
 use console::style;
