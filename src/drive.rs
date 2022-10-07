@@ -1,10 +1,10 @@
 use crate::{
     config::Config,
     data::{Id, IdRef, Kind, Navigator, ShowNav},
-    ui, Result,
+    ui::{self, SelectMany},
 };
 use console::{style, Style};
-use eyre::{eyre, WrapErr};
+use eyre::{eyre, Result, WrapErr};
 use std::{
     borrow::Borrow,
     fs::File,
@@ -27,9 +27,17 @@ pub fn current(
     false
 }
 
-pub fn select(config: &Config) -> Result<bool> {
+pub fn select(ui: impl SelectMany, config: &Config) -> Result<Option<bool>> {
+    if config.navigators.is_empty() {
+        Ok(None)
+    } else {
+        select_navigators(ui, config).map(Some)
+    }
+}
+
+fn select_navigators(ui: impl SelectMany, config: &Config) -> Result<bool> {
     let currently = get_current().unwrap_or_default();
-    let ids = ui::select_ids_from(ui::ui(), Kind::Navigator, config, &currently)?;
+    let ids = ui::select_ids_from(ui, Kind::Navigator, config, &currently)?;
     run(&ids, config)
 }
 

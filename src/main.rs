@@ -129,7 +129,9 @@ fn main() -> Result<()> {
 }
 
 fn select_drive(config: &Config) -> Result<bool> {
-    if config.navigators.is_empty() {
+    if let Some(changed) = drive::select(ui::ui(), config)? {
+        Ok(changed)
+    } else {
         use std::fmt::Write;
         let mut pre_help = String::with_capacity(128);
         writeln!(pre_help, "{}", style("No navigators found").yellow())?;
@@ -147,10 +149,8 @@ fn select_drive(config: &Config) -> Result<bool> {
         eprintln!();
         eprintln!();
         args::print_help_stderr()?;
-
-        return Ok(false);
+        Ok(false)
     }
-    drive::select(config)
 }
 
 mod list {
