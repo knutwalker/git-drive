@@ -2,9 +2,9 @@
 
 use crate::{
     config::Config,
-    data::{Driver, Id, IdRef, Kind, Navigator, PartialNav},
-    Result,
+    data::{Driver, Field, Id, IdRef, Kind, Navigator, PartialNav},
 };
+use eyre::Result;
 use validation::{CheckForEmpty, Lookup, Validator};
 
 mod tui;
@@ -21,7 +21,7 @@ pub trait SelectMany {
 pub trait PromptText {
     fn prompt_for_text<V: Validator>(
         &mut self,
-        thing: &'static str,
+        field: Field,
         id: &str,
         initial: Option<String>,
         validator: V,
@@ -32,14 +32,14 @@ pub trait PromptAlias {
     fn prompt_for_alias<V: Validator>(&mut self, kind: Kind, validator: V) -> Result<String>;
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Selectable<'a> {
-    item: &'a str,
-    checked: bool,
+    pub item: &'a str,
+    pub checked: bool,
 }
 
 pub fn complete_new_nav(
-    mut ui: impl PromptAlias + PromptText + Sized,
+    mut ui: impl PromptAlias + PromptText,
     partial: PartialNav,
     config: &Config,
 ) -> Result<Navigator> {
@@ -47,7 +47,7 @@ pub fn complete_new_nav(
 }
 
 pub fn complete_existing_nav(
-    mut ui: impl PromptAlias + PromptText + Sized,
+    mut ui: impl PromptAlias + PromptText,
     partial: PartialNav,
     config: &Config,
 ) -> Result<Navigator> {
@@ -55,7 +55,7 @@ pub fn complete_existing_nav(
 }
 
 pub fn complete_new_drv(
-    mut ui: impl PromptAlias + PromptText + Sized,
+    mut ui: impl PromptAlias + PromptText,
     partial: PartialNav,
     config: &Config,
 ) -> Result<Driver> {
@@ -63,7 +63,7 @@ pub fn complete_new_drv(
 }
 
 pub fn complete_existing_drv(
-    mut ui: impl PromptAlias + PromptText + Sized,
+    mut ui: impl PromptAlias + PromptText,
     partial: PartialNav,
     config: &Config,
 ) -> Result<Driver> {
@@ -106,12 +106,12 @@ impl<'a, T: SelectMany> SelectMany for &'a mut T {
 impl<'a, T: PromptText> PromptText for &'a mut T {
     fn prompt_for_text<V: Validator>(
         &mut self,
-        thing: &'static str,
+        field: Field,
         id: &str,
         initial: Option<String>,
         validator: V,
     ) -> Result<String> {
-        T::prompt_for_text(self, thing, id, initial, validator)
+        T::prompt_for_text(self, field, id, initial, validator)
     }
 }
 
@@ -202,14 +202,9 @@ fn selectable_items<'config>(
 }
 
 trait PromptTextExt: PromptText + Sized {
-    fn prompt_for(
-        &mut self,
-        thing: &'static str,
-        id: &str,
-        initial: Option<String>,
-    ) -> Result<String> {
-        let validator = CheckForEmpty::new(thing);
-        let result = self.prompt_for_text(thing, id, initial, &validator)?;
+    fn prompt_for(&mut self, field: Field, id: &str, initial: Option<String>) -> Result<String> {
+        let validator = CheckForEmpty::new(field);
+        let result = self.prompt_for_text(field, id, initial, &validator)?;
         (&validator).validate(&result)?;
 
         Ok(result)
@@ -223,12 +218,12 @@ trait PromptTextExt: PromptText + Sized {
         existing: Option<&Navigator>,
     ) -> Result<Navigator> {
         let name = self.prompt_for(
-            "name",
+            Field::Name,
             &alias,
             name.or_else(|| existing.map(|n| n.name.clone())),
         )?;
         let email = self.prompt_for(
-            "email",
+            Field::Email,
             &alias,
             email.or_else(|| existing.map(|n| n.email.clone())),
         )?;
@@ -247,10 +242,10 @@ trait PromptTextExt: PromptText + Sized {
         let navigator = self.finish_nav(alias, name, email, existing.map(|d| &d.navigator))?;
 
         let key = self.prompt_for_text(
-            "signing key",
+            Field::Key,
             &navigator.alias,
             key.or_else(|| existing.and_then(|d| d.key.clone())),
-            &CheckForEmpty::new("signing key").with_allow_empty(true),
+            &CheckForEmpty::new(Field::Key).with_allow_empty(true),
         )?;
 
         let key = if key.is_empty() { None } else { Some(key) };
@@ -268,7 +263,7 @@ trait PromptAliasExt: PromptAlias + PromptText + Sized {
         config: &'config Config,
         existing: Option<String>,
     ) -> Result<(Id, Option<&'config T::Entity>)> {
-        let check_empty = CheckForEmpty::new("alias");
+        let check_empty = CheckForEmpty::new(Field::Alias);
         let lookup = Lookup::<T>::new(config, check);
         let mut validator = (&check_empty).and_then(lookup);
 
@@ -381,20 +376,24 @@ impl Seat for NavigatorSeat {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::data::tests::{drv1, nav1, nav2};
+pub mod util {
     use std::cell::Cell;
+
+    use crate::data::Field;
+
+    use super::{
+        Kind, PromptAlias, PromptText, Result, SelectMany, SelectOne, Selectable, Validator,
+    };
 
     impl<A: PromptText, B> PromptText for (A, B) {
         fn prompt_for_text<V: Validator>(
             &mut self,
-            thing: &'static str,
+            field: Field,
             id: &str,
             initial: Option<String>,
             validator: V,
         ) -> Result<String> {
-            self.0.prompt_for_text(thing, id, initial, validator)
+            self.0.prompt_for_text(field, id, initial, validator)
         }
     }
 
@@ -405,7 +404,7 @@ mod tests {
     }
 
     #[derive(Copy, Clone, Debug)]
-    struct FromFn<F>(F);
+    pub struct FromFn<F>(F);
 
     impl<F> SelectOne for FromFn<F>
     where
@@ -427,16 +426,16 @@ mod tests {
 
     impl<F> PromptText for FromFn<F>
     where
-        F: FnMut(&'static str, &str, Option<String>) -> Result<String>,
+        F: FnMut(Field, &str, Option<String>) -> Result<String>,
     {
         fn prompt_for_text<V: Validator>(
             &mut self,
-            thing: &'static str,
+            field: Field,
             id: &str,
             initial: Option<String>,
             _validator: V,
         ) -> Result<String> {
-            (self.0)(thing, id, initial)
+            (self.0)(field, id, initial)
         }
     }
 
@@ -449,35 +448,35 @@ mod tests {
         }
     }
 
-    const fn select_one<F>(f: F) -> FromFn<F>
+    pub fn select_one<F>(f: F) -> FromFn<F>
     where
         F: FnMut(Kind, &[Selectable<'_>]) -> Result<usize>,
     {
         FromFn(f)
     }
 
-    const fn select_many<F>(f: F) -> FromFn<F>
+    pub fn select_many<F>(f: F) -> FromFn<F>
     where
         F: FnMut(Kind, &[Selectable<'_>]) -> Result<Vec<usize>>,
     {
         FromFn(f)
     }
 
-    const fn prompt_text<F>(f: F) -> FromFn<F>
+    pub fn prompt_text<F>(f: F) -> FromFn<F>
     where
-        F: FnMut(&'static str, &str, Option<String>) -> Result<String>,
+        F: FnMut(Field, &str, Option<String>) -> Result<String>,
     {
         FromFn(f)
     }
 
-    const fn prompt_alias<F>(f: F) -> FromFn<F>
+    pub fn prompt_alias<F>(f: F) -> FromFn<F>
     where
         F: FnMut(Kind) -> Result<String>,
     {
         FromFn(f)
     }
 
-    struct NoUi;
+    pub struct NoUi;
 
     #[allow(unused)]
     impl SelectOne for NoUi {
@@ -495,13 +494,13 @@ mod tests {
     impl PromptText for NoUi {
         fn prompt_for_text<V: Validator>(
             &mut self,
-            thing: &'static str,
+            field: Field,
             id: &str,
             initial: Option<String>,
             _validator: V,
         ) -> Result<String> {
             panic!(
-                "Unexpected call to prompt_for_text with thing={thing} id={id} initial={initial:?}"
+                "Unexpected call to prompt_for_text with field={field} id={id} initial={initial:?}"
             )
         }
     }
@@ -512,7 +511,75 @@ mod tests {
         }
     }
 
-    struct ColorGuard(bool);
+    impl<T> std::ops::Shr<T> for Field {
+        type Output = (Self, T);
+
+        fn shr(self, rhs: T) -> Self::Output {
+            (self, rhs)
+        }
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    pub struct ExpectField(Cell<Field>);
+
+    impl ExpectField {
+        pub fn new(field: Field) -> Self {
+            Self(Cell::new(field))
+        }
+
+        pub fn expect(&self, field: Field) {
+            assert_eq!(self.0.get(), field);
+        }
+
+        pub fn expect_done(&self) {
+            assert_eq!(self.0.get(), Field::Done);
+        }
+
+        pub fn next(&self, expect: Field, next: Field) {
+            match self.0.get() {
+                f if f == expect => self.0.set(next),
+                f => panic!("Expected field {} but got {}", expect, f),
+            }
+        }
+
+        pub fn with(&self, mut check: impl FnMut(Field) -> Field) {
+            let current = self.0.get();
+            match check(current) {
+                Field::Unexpected => panic!("Unexpected field: {}", current),
+                otherwise => self.0.set(otherwise),
+            }
+        }
+
+        pub fn get<T>(&self, mut fun: impl FnMut(Field) -> Option<T>) -> T {
+            let current = self.0.get();
+            match fun(current) {
+                Some(value) => value,
+                None => panic!("Unexpected field: {}", current),
+            }
+        }
+    }
+
+    #[macro_export]
+    macro_rules! next {
+        ($($pat:pat => $expr:expr),+ $(,)?) => {
+            |field| match field {
+                $($pat => $expr,)+
+                _ => Field::Unexpected,
+            }
+        };
+    }
+
+    #[macro_export]
+    macro_rules! partial {
+        ($($pat:pat => $expr:expr),+ $(,)?) => {
+            |field| match field {
+                $($pat => Some($expr),)+
+                _ => None,
+            }
+        };
+    }
+
+    pub struct ColorGuard(bool);
 
     impl Drop for ColorGuard {
         fn drop(&mut self) {
@@ -520,11 +587,23 @@ mod tests {
         }
     }
 
-    fn disable_colors() -> impl Drop {
+    pub fn disable_colors() -> impl Drop {
         let colors = console::colors_enabled();
         console::set_colors_enabled(false);
         ColorGuard(colors)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::util::{disable_colors, prompt_alias, prompt_text, select_many, select_one, NoUi};
+    use super::*;
+    use crate::{
+        data::tests::{drv1, nav1, nav2},
+        next, partial,
+        ui::util::ExpectField,
+    };
+    use std::cell::Cell;
 
     #[test]
     fn test_select_id_with_empty_options() {
@@ -618,33 +697,31 @@ mod tests {
 
     #[test]
     fn complete_new_nav_with_no_input() {
-        let ask_for = Cell::new("alias");
+        let ask_for = ExpectField::new(Field::Alias);
 
-        let text = prompt_text(|thing, id, initial| {
-            assert_eq!(thing, ask_for.get());
+        let text = prompt_text(|field, id, initial| {
             assert_eq!(id, "alias");
             assert_eq!(initial.as_deref(), None);
 
-            ask_for.set(match ask_for.get() {
-                "name" => "email",
-                "email" => "done",
-                what => panic!("Unexpected thing: {what}"),
+            ask_for.expect(field);
+            ask_for.with(next! {
+                Field::Name => Field::Email,
+                Field::Email => Field::Done,
             });
 
-            Ok(String::from(thing))
+            Ok(field.to_string())
         });
 
         let alias = prompt_alias(|kind| {
             assert_eq!(kind, Kind::Navigator);
-            assert_eq!(ask_for.get(), "alias");
-            ask_for.set("name");
+            ask_for.next(Field::Alias, Field::Name);
             Ok(String::from("alias"))
         });
 
         let nav =
             complete_new_nav((text, alias), PartialNav::default(), &Config::default()).unwrap();
 
-        assert_eq!(ask_for.get(), "done");
+        ask_for.expect_done();
         assert_eq!(nav.alias.0, "alias");
         assert_eq!(nav.name, "name");
         assert_eq!(nav.email, "email");
@@ -652,31 +729,29 @@ mod tests {
 
     #[test]
     fn complete_new_nav_with_name() {
-        let ask_for = Cell::new("alias");
+        let ask_for = ExpectField::new(Field::Alias);
 
-        let text = prompt_text(|thing, id, initial| {
-            assert_eq!(thing, ask_for.get());
+        let text = prompt_text(|field, id, initial| {
             assert_eq!(id, "alias");
 
-            ask_for.set(match ask_for.get() {
-                "name" => {
+            ask_for.expect(field);
+            ask_for.with(next! {
+                Field::Name => {
                     assert_eq!(initial.as_deref(), Some("some name"));
-                    "email"
-                }
-                "email" => {
+                    Field::Email
+                },
+                Field::Email => {
                     assert_eq!(initial.as_deref(), None);
-                    "done"
-                }
-                what => panic!("Unexpected thing: {what}"),
+                    Field::Done
+                },
             });
 
-            Ok(String::from(thing))
+            Ok(field.to_string())
         });
 
         let alias = prompt_alias(|kind| {
             assert_eq!(kind, Kind::Navigator);
-            assert_eq!(ask_for.get(), "alias");
-            ask_for.set("name");
+            ask_for.next(Field::Alias, Field::Name);
             Ok(String::from("alias"))
         });
 
@@ -686,7 +761,7 @@ mod tests {
             &Config::default(),
         )
         .unwrap();
-        assert_eq!(ask_for.get(), "done");
+        ask_for.expect_done();
         assert_eq!(nav.alias.0, "alias");
         assert_eq!(nav.name, "name");
         assert_eq!(nav.email, "email");
@@ -724,70 +799,76 @@ mod tests {
 
     #[test]
     fn complete_existing_nav_with_no_input() {
-        let ask_for = Cell::new("alias");
+        let ask_for = ExpectField::new(Field::Alias);
         let navigator = nav1();
 
-        let text = prompt_text(|thing, id, initial| {
-            assert_eq!(thing, ask_for.get());
+        let text = prompt_text(|field, id, initial| {
             assert_eq!(id, navigator.id().as_ref());
+            ask_for.expect(field);
 
-            Ok(match ask_for.get() {
-                "name" => {
+            let value = ask_for.get(partial! {
+                Field::Name => navigator.name.clone(),
+                Field::Email => navigator.email.clone(),
+            });
+
+            ask_for.with(next! {
+                Field::Name => {
                     assert_eq!(initial.as_deref(), Some(navigator.name.as_str()));
-                    ask_for.set("email");
-                    navigator.name.clone()
-                }
-                "email" => {
+                    Field::Email
+                },
+                Field::Email => {
                     assert_eq!(initial.as_deref(), Some(navigator.email.as_str()));
-                    ask_for.set("done");
-                    navigator.email.clone()
-                }
-                what => panic!("Unexpected thing: {what}"),
-            })
+                    Field::Done
+                },
+            });
+
+            Ok(value)
         });
 
         let alias = prompt_alias(|kind| {
             assert_eq!(kind, Kind::Navigator);
-            assert_eq!(ask_for.get(), "alias");
-            ask_for.set("name");
+            ask_for.next(Field::Alias, Field::Name);
             Ok(navigator.alias.0.clone())
         });
 
         let config = Config::from_iter([nav1()]);
 
         let nav = complete_existing_nav((text, alias), PartialNav::default(), &config).unwrap();
-        assert_eq!(ask_for.get(), "done");
+        ask_for.expect_done();
         assert_eq!(nav, navigator);
     }
 
     #[test]
     fn complete_existing_nav_with_name() {
-        let ask_for = Cell::new("alias");
+        let ask_for = ExpectField::new(Field::Alias);
         let navigator = nav1();
 
-        let text = prompt_text(|thing, id, initial| {
-            assert_eq!(thing, ask_for.get());
+        let text = prompt_text(|field, id, initial| {
             assert_eq!(id, navigator.id().as_ref());
+            ask_for.expect(field);
 
-            Ok(match ask_for.get() {
-                "name" => {
+            let value = ask_for.get(partial! {
+                Field::Name => navigator.name.clone(),
+                Field::Email => navigator.email.clone(),
+            });
+
+            ask_for.with(next! {
+                Field::Name => {
                     assert_eq!(initial.as_deref(), Some("some name"));
-                    ask_for.set("email");
-                    navigator.name.clone()
-                }
-                "email" => {
+                    Field::Email
+                },
+                Field::Email => {
                     assert_eq!(initial.as_deref(), Some(navigator.email.as_str()));
-                    ask_for.set("done");
-                    navigator.email.clone()
-                }
-                what => panic!("Unexpected thing: {what}"),
-            })
+                    Field::Done
+                },
+            });
+
+            Ok(value)
         });
 
         let alias = prompt_alias(|kind| {
             assert_eq!(kind, Kind::Navigator);
-            assert_eq!(ask_for.get(), "alias");
-            ask_for.set("name");
+            ask_for.next(Field::Alias, Field::Name);
             Ok(navigator.alias.0.clone())
         });
 
@@ -799,7 +880,7 @@ mod tests {
             &config,
         )
         .unwrap();
-        assert_eq!(ask_for.get(), "done");
+        ask_for.expect_done();
         assert_eq!(nav, navigator);
     }
 
@@ -835,33 +916,31 @@ mod tests {
 
     #[test]
     fn complete_new_drv_with_no_input() {
-        let ask_for = Cell::new("alias");
+        let ask_for = ExpectField::new(Field::Alias);
 
-        let text = prompt_text(|thing, id, initial| {
-            assert_eq!(thing, ask_for.get());
-            assert_eq!(initial.as_deref(), None);
+        let text = prompt_text(|field, id, initial| {
             assert_eq!(id, "alias");
+            assert_eq!(initial.as_deref(), None);
 
-            ask_for.set(match ask_for.get() {
-                "name" => "email",
-                "email" => "signing key",
-                "signing key" => "done",
-                what => panic!("Unexpected thing: {what}"),
+            ask_for.expect(field);
+            ask_for.with(next! {
+                Field::Name => Field::Email,
+                Field::Email => Field::Key,
+                Field::Key => Field::Done,
             });
 
-            Ok(String::from(thing))
+            Ok(field.to_string())
         });
 
         let alias = prompt_alias(|kind| {
             assert_eq!(kind, Kind::Driver);
-            assert_eq!(ask_for.get(), "alias");
-            ask_for.set("name");
+            ask_for.next(Field::Alias, Field::Name);
             Ok(String::from("alias"))
         });
 
         let drv =
             complete_new_drv((text, alias), PartialNav::default(), &Config::default()).unwrap();
-        assert_eq!(ask_for.get(), "done");
+        ask_for.expect_done();
         assert_eq!(drv.navigator.alias.0, "alias");
         assert_eq!(drv.navigator.name, "name");
         assert_eq!(drv.navigator.email, "email");
@@ -870,35 +949,33 @@ mod tests {
 
     #[test]
     fn complete_new_drv_with_name() {
-        let ask_for = Cell::new("alias");
+        let ask_for = ExpectField::new(Field::Alias);
 
-        let text = prompt_text(|thing, id, initial| {
-            assert_eq!(thing, ask_for.get());
+        let text = prompt_text(|field, id, initial| {
             assert_eq!(id, "alias");
 
-            ask_for.set(match ask_for.get() {
-                "name" => {
+            ask_for.expect(field);
+            ask_for.with(next! {
+                Field::Name => {
                     assert_eq!(initial.as_deref(), Some("some name"));
-                    "email"
-                }
-                "email" => {
+                    Field::Email
+                },
+                Field::Email => {
                     assert_eq!(initial.as_deref(), None);
-                    "signing key"
-                }
-                "signing key" => {
+                    Field::Key
+                },
+                Field::Key => {
                     assert_eq!(initial.as_deref(), None);
-                    "done"
-                }
-                what => panic!("Unexpected thing: {what}"),
+                    Field::Done
+                },
             });
 
-            Ok(String::from(thing))
+            Ok(field.to_string())
         });
 
         let alias = prompt_alias(|kind| {
             assert_eq!(kind, Kind::Driver);
-            assert_eq!(ask_for.get(), "alias");
-            ask_for.set("name");
+            ask_for.next(Field::Alias, Field::Name);
             Ok(String::from("alias"))
         });
 
@@ -908,7 +985,7 @@ mod tests {
             &Config::default(),
         )
         .unwrap();
-        assert_eq!(ask_for.get(), "done");
+        ask_for.expect_done();
         assert_eq!(drv.navigator.alias.0, "alias");
         assert_eq!(drv.navigator.name, "name");
         assert_eq!(drv.navigator.email, "email");
@@ -917,9 +994,9 @@ mod tests {
 
     #[test]
     fn complete_new_drv_empty_key_is_none() {
-        let text = prompt_text(|thing, _id, _initial| match thing {
-            "signing key" => Ok(String::new()),
-            otherwise => Ok(String::from(otherwise)),
+        let text = prompt_text(|field, _id, _initial| match field {
+            Field::Key => Ok(String::new()),
+            otherwise => Ok(otherwise.to_string()),
         });
 
         let alias = prompt_alias(|_kind| Ok(String::from("alias")));
@@ -960,80 +1037,86 @@ mod tests {
 
     #[test]
     fn complete_existing_drv_with_no_input() {
-        let ask_for = Cell::new("alias");
+        let ask_for = ExpectField::new(Field::Alias);
         let driver = drv1("a key");
 
-        let text = prompt_text(|thing, id, initial| {
-            assert_eq!(thing, ask_for.get());
+        let text = prompt_text(|field, id, initial| {
             assert_eq!(id, driver.id().as_ref());
+            ask_for.expect(field);
 
-            Ok(match ask_for.get() {
-                "name" => {
+            let value = ask_for.get(partial! {
+                Field::Name => driver.navigator.name.clone(),
+                Field::Email => driver.navigator.email.clone(),
+                Field::Key => driver.key.clone().unwrap_or_default(),
+            });
+
+            ask_for.with(next! {
+                Field::Name => {
                     assert_eq!(initial.as_deref(), Some(driver.navigator.name.as_str()));
-                    ask_for.set("email");
-                    driver.navigator.name.clone()
-                }
-                "email" => {
+                    Field::Email
+                },
+                Field::Email => {
                     assert_eq!(initial.as_deref(), Some(driver.navigator.email.as_str()));
-                    ask_for.set("signing key");
-                    driver.navigator.email.clone()
-                }
-                "signing key" => {
+                    Field::Key
+                },
+                Field::Key => {
                     assert_eq!(initial.as_deref(), driver.key.as_deref());
-                    ask_for.set("done");
-                    driver.key.clone().unwrap_or_default()
-                }
-                what => panic!("Unexpected thing: {what}"),
-            })
+                    Field::Done
+                },
+            });
+
+            Ok(value)
         });
 
         let alias = prompt_alias(|kind| {
             assert_eq!(kind, Kind::Driver);
-            assert_eq!(ask_for.get(), "alias");
-            ask_for.set("name");
+            ask_for.next(Field::Alias, Field::Name);
             Ok(driver.navigator.alias.0.clone())
         });
 
         let config = Config::from_iter([driver.clone()]);
 
         let drv = complete_existing_drv((text, alias), PartialNav::default(), &config).unwrap();
-        assert_eq!(ask_for.get(), "done");
+        ask_for.expect_done();
         assert_eq!(drv, driver);
     }
 
     #[test]
     fn complete_existing_drv_with_name() {
-        let ask_for = Cell::new("alias");
+        let ask_for = ExpectField::new(Field::Alias);
         let driver = drv1("a key");
 
-        let text = prompt_text(|thing, id, initial| {
-            assert_eq!(thing, ask_for.get());
+        let text = prompt_text(|field, id, initial| {
             assert_eq!(id, driver.id().as_ref());
+            ask_for.expect(field);
 
-            Ok(match ask_for.get() {
-                "name" => {
+            let value = ask_for.get(partial! {
+                Field::Name => driver.navigator.name.clone(),
+                Field::Email => driver.navigator.email.clone(),
+                Field::Key => driver.key.clone().unwrap_or_default(),
+            });
+
+            ask_for.with(next! {
+                Field::Name => {
                     assert_eq!(initial.as_deref(), Some("some name"));
-                    ask_for.set("email");
-                    driver.navigator.name.clone()
-                }
-                "email" => {
+                    Field::Email
+                },
+                Field::Email => {
                     assert_eq!(initial.as_deref(), Some(driver.navigator.email.as_str()));
-                    ask_for.set("signing key");
-                    driver.navigator.email.clone()
-                }
-                "signing key" => {
+                    Field::Key
+                },
+                Field::Key => {
                     assert_eq!(initial.as_deref(), driver.key.as_deref());
-                    ask_for.set("done");
-                    driver.key.clone().unwrap_or_default()
-                }
-                what => panic!("Unexpected thing: {what}"),
-            })
+                    Field::Done
+                },
+            });
+
+            Ok(value)
         });
 
         let alias = prompt_alias(|kind| {
             assert_eq!(kind, Kind::Driver);
-            assert_eq!(ask_for.get(), "alias");
-            ask_for.set("name");
+            ask_for.next(Field::Alias, Field::Name);
             Ok(driver.navigator.alias.0.clone())
         });
 
@@ -1045,15 +1128,15 @@ mod tests {
             &config,
         )
         .unwrap();
-        assert_eq!(ask_for.get(), "done");
+        ask_for.expect_done();
         assert_eq!(drv, driver);
     }
 
     #[test]
     fn complete_existing_drv_empty_key_is_none() {
-        let text = prompt_text(|thing, _id, _initial| match thing {
-            "signing key" => Ok(String::new()),
-            otherwise => Ok(String::from(otherwise)),
+        let text = prompt_text(|field, _id, _initial| match field {
+            Field::Key => Ok(String::new()),
+            otherwise => Ok(otherwise.to_string()),
         });
 
         let alias = prompt_alias(|_kind| Ok(String::from("drv1")));

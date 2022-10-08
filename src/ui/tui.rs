@@ -2,7 +2,10 @@ use core::fmt;
 
 // use super::*;
 use super::{PromptAlias, PromptText, SelectMany, SelectOne, Selectable};
-use crate::{data::Kind, ui::validation::Validator};
+use crate::{
+    data::{Field, Kind},
+    ui::validation::Validator,
+};
 use console::{style, Style, StyledObject};
 use dialoguer::{theme::ColorfulTheme, theme::Theme, Input, MultiSelect, Select};
 use eyre::Result;
@@ -49,14 +52,14 @@ impl SelectMany for ConsoleUi {
 impl PromptText for ConsoleUi {
     fn prompt_for_text<V: Validator>(
         &mut self,
-        thing: &'static str,
+        field: Field,
         id: &str,
         initial: Option<String>,
         validator: V,
     ) -> Result<String> {
         let mut input = Input::<String>::with_theme(&*THEME);
         input
-            .with_prompt(format!("The {} for {}\n", thing, style(id).cyan()))
+            .with_prompt(format!("The {} for {}\n", field, style(id).cyan()))
             .allow_empty(true)
             .validate_with(adapt(validator));
 

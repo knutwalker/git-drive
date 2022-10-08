@@ -1,5 +1,5 @@
 use super::{CheckMode, Seat};
-use crate::config::Config;
+use crate::{config::Config, data::Field};
 use console::style;
 use eyre::{bail, eyre, Result};
 use std::{cell::Cell, marker::PhantomData};
@@ -27,15 +27,15 @@ impl Validator for NoOp {
 #[derive(Clone, Debug)]
 pub struct CheckForEmpty {
     messages: Cell<[MsgTemplate; 2]>,
-    entity: &'static str,
+    field: Field,
     allow_empty: bool,
 }
 
 impl CheckForEmpty {
-    pub const fn new(entity: &'static str) -> Self {
+    pub const fn new(field: Field) -> Self {
         Self {
             messages: Cell::new([MsgTemplate::MustNotBeEmpty, MsgTemplate::EnterANonEmptyName]),
-            entity,
+            field,
             allow_empty: false,
         }
     }
@@ -61,10 +61,10 @@ impl Validator for &CheckForEmpty {
 
         let err = match tpl {
             MsgTemplate::MustNotBeEmpty => {
-                eyre!("The {} must not be empty.", self.entity)
+                eyre!("The {} must not be empty.", self.field)
             }
             MsgTemplate::EnterANonEmptyName => {
-                eyre!("Please enter a non-empty {}.", self.entity)
+                eyre!("Please enter a non-empty {}.", self.field)
             }
         };
         Err(err)

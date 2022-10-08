@@ -33,6 +33,34 @@ pub enum Kind {
     Driver,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Field {
+    Alias,
+    Name,
+    Email,
+    Key,
+    #[cfg(test)]
+    Done,
+    #[cfg(test)]
+    Unexpected,
+}
+
+impl fmt::Display for Field {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Alias => f.write_str("alias"),
+            Self::Name => f.write_str("name"),
+            Self::Email => f.write_str("email"),
+            Self::Key => f.write_str("signing key"),
+            #[cfg(test)]
+            Self::Done => f.write_str("done"),
+            #[cfg(test)]
+            Self::Unexpected => f.write_str("unexpected field"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PartialNav {
     pub id: Option<String>,
@@ -42,6 +70,17 @@ pub struct PartialNav {
 }
 
 impl PartialNav {
+    pub fn with(self, field: Field, value: impl Into<Option<String>>) -> Self {
+        match field {
+            Field::Alias => self.with_id(value),
+            Field::Name => self.with_name(value),
+            Field::Email => self.with_email(value),
+            Field::Key => self.with_key(value),
+            #[cfg(test)]
+            _ => self,
+        }
+    }
+
     pub fn with_id(self, id: impl Into<Option<String>>) -> Self {
         Self {
             id: id.into(),
@@ -138,6 +177,12 @@ impl Borrow<str> for &Navigator {
     fn borrow(&self) -> &str {
         &self.alias
     }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Modification {
+    Changed,
+    Unchanged,
 }
 
 #[cfg(test)]

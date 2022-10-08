@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    data::{Id, IdRef, Kind, Navigator, ShowNav},
+    data::{Id, IdRef, Kind, Modification, Navigator, ShowNav},
     ui::{self, SelectMany},
 };
 use console::{style, Style};
@@ -18,16 +18,17 @@ pub fn current(
         color,
         fail_if_empty,
     }: ShowNav,
-) -> bool {
+) -> Modification {
     let current = current_fallible(&color);
     if fail_if_empty && matches!(current, Ok(false) | Err(_)) {
         std::process::exit(1);
     }
 
-    false
+    Modification::Unchanged
 }
 
-pub fn select(ui: impl SelectMany, config: &Config) -> Result<Option<bool>> {
+pub fn select(ui: impl SelectMany, config: &Config) -> Result<Option<Modification>> {
+    // TODO: proper error type
     if config.navigators.is_empty() {
         Ok(None)
     } else {
@@ -35,13 +36,13 @@ pub fn select(ui: impl SelectMany, config: &Config) -> Result<Option<bool>> {
     }
 }
 
-fn select_navigators(ui: impl SelectMany, config: &Config) -> Result<bool> {
+fn select_navigators(ui: impl SelectMany, config: &Config) -> Result<Modification> {
     let currently = get_current().unwrap_or_default();
     let ids = ui::select_ids_from(ui, Kind::Navigator, config, &currently)?;
     run(&ids, config)
 }
 
-pub fn run<I>(ids: &[I], config: &Config) -> Result<bool>
+pub fn run<I>(ids: &[I], config: &Config) -> Result<Modification>
 where
     I: IdRef,
 {
@@ -51,12 +52,12 @@ where
         .collect::<Result<Vec<_>>>()?;
 
     if navigators.is_empty() {
-        return drive_alone();
+        return alone();
     }
 
     drive_with(navigators.into_iter())?;
 
-    Ok(false)
+    Ok(Modification::Unchanged)
 }
 
 fn match_navigator<'config>(query: &Id, config: &'config Config) -> Result<&'config Navigator> {
@@ -129,7 +130,7 @@ fn match_caseless(query: &str, navigator: &str) -> bool {
     )
 }
 
-pub fn drive_alone() -> Result<bool> {
+pub fn alone() -> Result<Modification> {
     let sc = Proc::new("git")
         .args(&["config", "--unset", "commit.template"])
         .spawn()?
@@ -151,7 +152,7 @@ pub fn drive_alone() -> Result<bool> {
         }
     }
 
-    Ok(false)
+    Ok(Modification::Unchanged)
 }
 
 /// U+001F - Information Separator One
