@@ -34,16 +34,11 @@ pub enum Kind {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum Field {
     Alias,
     Name,
     Email,
     Key,
-    #[cfg(test)]
-    Done,
-    #[cfg(test)]
-    Unexpected,
 }
 
 impl fmt::Display for Field {
@@ -53,10 +48,6 @@ impl fmt::Display for Field {
             Self::Name => f.write_str("name"),
             Self::Email => f.write_str("email"),
             Self::Key => f.write_str("signing key"),
-            #[cfg(test)]
-            Self::Done => f.write_str("done"),
-            #[cfg(test)]
-            Self::Unexpected => f.write_str("unexpected field"),
         }
     }
 }
@@ -76,8 +67,6 @@ impl PartialNav {
             Field::Name => self.with_name(value),
             Field::Email => self.with_email(value),
             Field::Key => self.with_key(value),
-            #[cfg(test)]
-            _ => self,
         }
     }
 
@@ -105,6 +94,58 @@ impl PartialNav {
     pub fn with_key(self, key: impl Into<Option<String>>) -> Self {
         Self {
             key: key.into(),
+            ..self
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PartialIdNav {
+    pub id: Id,
+    pub name: Option<String>,
+    pub email: Option<String>,
+    pub key: Option<String>,
+}
+
+impl PartialIdNav {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: Id(id.into()),
+            name: None,
+            email: None,
+            key: None,
+        }
+    }
+
+    pub fn merge(self, partial: PartialNav) -> Self {
+        Self {
+            id: self.id,
+            name: partial.name.or(self.name),
+            email: partial.email.or(self.email),
+            key: partial.key.or(self.key),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn with_name<S: Into<String>>(self, name: impl Into<Option<S>>) -> Self {
+        Self {
+            name: name.into().map(Into::into),
+            ..self
+        }
+    }
+
+    #[cfg(test)]
+    pub fn with_email<S: Into<String>>(self, email: impl Into<Option<S>>) -> Self {
+        Self {
+            email: email.into().map(Into::into),
+            ..self
+        }
+    }
+
+    #[cfg(test)]
+    pub fn with_key<S: Into<String>>(self, key: impl Into<Option<S>>) -> Self {
+        Self {
+            key: key.into().map(Into::into),
             ..self
         }
     }
@@ -176,6 +217,12 @@ impl IdRef for Driver {
 impl Borrow<str> for &Navigator {
     fn borrow(&self) -> &str {
         &self.alias
+    }
+}
+
+impl From<&Id> for String {
+    fn from(id: &Id) -> Self {
+        id.0.clone()
     }
 }
 

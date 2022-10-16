@@ -7,11 +7,20 @@ use std::{cell::Cell, marker::PhantomData};
 pub trait Validator {
     fn validate(&mut self, input: &str) -> Result<()>;
 
-    fn and_then<T: Validator>(self, other: T) -> Combined<Self, T>
+    fn and_then<T: Validator>(self, other: T) -> AndThen<Self, T>
     where
         Self: Sized,
     {
-        Combined(self, other)
+        AndThen(self, other)
+    }
+}
+
+impl<T> Validator for &mut T
+where
+    T: Validator,
+{
+    fn validate(&mut self, input: &str) -> Result<()> {
+        T::validate(self, input)
     }
 }
 
@@ -48,7 +57,7 @@ impl CheckForEmpty {
     }
 }
 
-impl Validator for &CheckForEmpty {
+impl Validator for CheckForEmpty {
     fn validate(&mut self, input: &str) -> Result<()> {
         if self.allow_empty || !input.trim().is_empty() {
             return Ok(());
@@ -78,9 +87,9 @@ enum MsgTemplate {
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-pub struct Combined<A, B>(A, B);
+pub struct AndThen<A, B>(A, B);
 
-impl<A, B> Validator for Combined<A, B>
+impl<A, B> Validator for AndThen<A, B>
 where
     A: Validator,
     B: Validator,
@@ -89,6 +98,12 @@ where
         self.0.validate(input)?;
         self.1.validate(input)?;
         Ok(())
+    }
+}
+
+impl<A, B> AndThen<A, B> {
+    pub fn into_inner(self) -> (A, B) {
+        (self.0, self.1)
     }
 }
 

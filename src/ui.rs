@@ -2,7 +2,8 @@
 
 use crate::{
     config::Config,
-    data::{Driver, Field, Id, IdRef, Kind, Navigator, PartialNav},
+    data::{Driver, Field, Id, IdRef, Kind, Navigator, PartialIdNav, PartialNav},
+    ui::validation::AndThen,
 };
 use eyre::Result;
 use validation::{CheckForEmpty, Lookup, Validator};
@@ -47,8 +48,8 @@ pub fn complete_new_nav(
 }
 
 pub fn complete_existing_nav(
-    mut ui: impl PromptAlias + PromptText,
-    partial: PartialNav,
+    mut ui: impl PromptText,
+    partial: PartialIdNav,
     config: &Config,
 ) -> Result<Navigator> {
     ui.complete_existing_nav(partial, config)
@@ -63,8 +64,8 @@ pub fn complete_new_drv(
 }
 
 pub fn complete_existing_drv(
-    mut ui: impl PromptAlias + PromptText,
-    partial: PartialNav,
+    mut ui: impl PromptText,
+    partial: PartialIdNav,
     config: &Config,
 ) -> Result<Driver> {
     ui.complete_existing_drv(partial, config)
@@ -203,11 +204,62 @@ fn selectable_items<'config>(
 
 trait PromptTextExt: PromptText + Sized {
     fn prompt_for(&mut self, field: Field, id: &str, initial: Option<String>) -> Result<String> {
-        let validator = CheckForEmpty::new(field);
-        let result = self.prompt_for_text(field, id, initial, &validator)?;
-        (&validator).validate(&result)?;
+        let mut validator = CheckForEmpty::new(field);
+        let result = self.prompt_for_text(field, id, initial, &mut validator)?;
+        validator.validate(&result)?;
 
         Ok(result)
+    }
+
+    fn complete_existing_nav(
+        &mut self,
+        partial: PartialIdNav,
+        config: &Config,
+    ) -> Result<Navigator> {
+        let PartialIdNav {
+            id,
+            name,
+            email,
+            key: _,
+        } = partial;
+        let validator = self.validator::<NavigatorSeat>(CheckMode::MustExist, config);
+        let existing = self.verify_alias(validator, &id)?;
+        self.finish_nav(id, name, email, existing)
+    }
+
+    fn complete_existing_drv(&mut self, partial: PartialIdNav, config: &Config) -> Result<Driver> {
+        let PartialIdNav {
+            id,
+            name,
+            email,
+            key,
+        } = partial;
+        let validator = self.validator::<DriverSeat>(CheckMode::MustExist, config);
+        let existing = self.verify_alias(validator, &id)?;
+        self.finish_drv(id, name, email, key, existing)
+    }
+
+    fn validator<'config, T: Seat>(
+        &self,
+        check: CheckMode,
+        config: &'config Config,
+    ) -> AndThen<CheckForEmpty, Lookup<'config, T>> {
+        let check_empty = CheckForEmpty::new(Field::Alias);
+        let lookup = Lookup::<T>::new(config, check);
+
+        (check_empty).and_then(lookup)
+    }
+
+    fn verify_alias<'config, T: Seat>(
+        &self,
+        mut validator: AndThen<CheckForEmpty, Lookup<'config, T>>,
+        alias: &str,
+    ) -> Result<Option<&'config T::Entity>> {
+        validator.validate(alias)?;
+        let (_, lookup) = validator.into_inner();
+        let existing = lookup.matching_navigator(alias);
+
+        Ok(existing)
     }
 
     fn finish_nav(
@@ -245,7 +297,7 @@ trait PromptTextExt: PromptText + Sized {
             Field::Key,
             &navigator.alias,
             key.or_else(|| existing.and_then(|d| d.key.clone())),
-            &CheckForEmpty::new(Field::Key).with_allow_empty(true),
+            CheckForEmpty::new(Field::Key).with_allow_empty(true),
         )?;
 
         let key = if key.is_empty() { None } else { Some(key) };
@@ -257,75 +309,44 @@ trait PromptTextExt: PromptText + Sized {
 impl<T: PromptText + Sized> PromptTextExt for T {}
 
 trait PromptAliasExt: PromptAlias + PromptText + Sized {
-    fn prompt_alias<'config, T: Seat + Copy>(
+    fn prompt_alias<'config, T: Seat>(
         &mut self,
-        check: CheckMode,
         config: &'config Config,
         existing: Option<String>,
     ) -> Result<(Id, Option<&'config T::Entity>)> {
-        let check_empty = CheckForEmpty::new(Field::Alias);
-        let lookup = Lookup::<T>::new(config, check);
-        let mut validator = (&check_empty).and_then(lookup);
+        let mut validator = self.validator::<T>(CheckMode::MustNotExist, config);
 
         let id = match existing {
             Some(id) => Id(id),
-            None => Id(self.prompt_for_alias(T::kind(), validator)?),
+            None => Id(self.prompt_for_alias(T::kind(), &mut validator)?),
         };
 
-        validator.validate(&id.0)?;
-
-        let existing = lookup.matching_navigator(&id);
+        let existing = self.verify_alias(validator, &id.0)?;
         Ok((id, existing))
     }
 
-    fn complete_nav(
-        &mut self,
-        check: CheckMode,
-        new: PartialNav,
-        config: &Config,
-    ) -> Result<Navigator> {
+    fn complete_new_nav(&mut self, partial: PartialNav, config: &Config) -> Result<Navigator> {
         let PartialNav {
             id,
             name,
             email,
             key: _,
-        } = new;
+        } = partial;
 
-        let (alias, existing) = self.prompt_alias::<NavigatorSeat>(check, config, id)?;
+        let (alias, existing) = self.prompt_alias::<NavigatorSeat>(config, id)?;
         self.finish_nav(alias, name, email, existing)
     }
 
-    fn complete_drv(
-        &mut self,
-        check: CheckMode,
-        new: PartialNav,
-        config: &Config,
-    ) -> Result<Driver> {
+    fn complete_new_drv(&mut self, partial: PartialNav, config: &Config) -> Result<Driver> {
         let PartialNav {
             id,
             name,
             email,
             key,
-        } = new;
+        } = partial;
 
-        let (alias, existing) = self.prompt_alias::<DriverSeat>(check, config, id)?;
+        let (alias, existing) = self.prompt_alias::<DriverSeat>(config, id)?;
         self.finish_drv(alias, name, email, key, existing)
-    }
-
-    fn complete_new_nav(&mut self, partial: PartialNav, config: &Config) -> Result<Navigator> {
-        self.complete_nav(CheckMode::MustNotExist, partial, config)
-    }
-
-    fn complete_existing_nav(&mut self, partial: PartialNav, config: &Config) -> Result<Navigator> {
-        self.complete_nav(CheckMode::MustExist, partial, config)
-    }
-
-    fn complete_new_drv(&mut self, partial: PartialNav, config: &Config) -> Result<Driver> {
-        self.complete_drv(CheckMode::MustNotExist, partial, config)
-    }
-
-    fn complete_existing_drv(&mut self, partial: PartialNav, config: &Config) -> Result<Driver> {
-        self.complete_drv(CheckMode::MustExist, partial, config)
     }
 }
 
@@ -377,7 +398,7 @@ impl Seat for NavigatorSeat {
 
 #[cfg(test)]
 pub mod util {
-    use std::cell::Cell;
+    use std::{convert::Infallible, marker::PhantomData};
 
     use crate::data::Field;
 
@@ -519,64 +540,220 @@ pub mod util {
         }
     }
 
-    #[derive(Debug, PartialEq, Eq)]
-    pub struct ExpectField(Cell<Field>);
+    pub struct AssertPromptText<S> {
+        id: String,
+        states: Vec<AssertState>,
+        _state: PhantomData<S>,
+    }
 
-    impl ExpectField {
-        pub fn new(field: Field) -> Self {
-            Self(Cell::new(field))
+    impl AssertPromptText<Building> {
+        pub fn start(id: impl Into<String>) -> Self {
+            Self {
+                id: id.into(),
+                states: Vec::new(),
+                _state: PhantomData,
+            }
         }
 
-        pub fn expect(&self, field: Field) {
-            assert_eq!(self.0.get(), field);
+        pub fn expect(self, field: Field) -> AssertExpect {
+            let state = AssertState {
+                current_field: field,
+                initial_matcher: Matcher::None,
+                produced_value: Returns::Field,
+            };
+
+            AssertExpect {
+                assert: self,
+                state,
+            }
+        }
+
+        pub fn done(mut self) -> AssertPromptText<Finished> {
+            self.states.reverse();
+            AssertPromptText {
+                id: self.id,
+                states: self.states,
+                _state: PhantomData::<Finished>,
+            }
+        }
+    }
+
+    impl AssertPromptText<Finished> {
+        pub fn as_ui(&mut self) -> impl PromptText + '_ {
+            self
         }
 
         pub fn expect_done(&self) {
-            assert_eq!(self.0.get(), Field::Done);
+            assert!(
+                self.states.is_empty(),
+                "Expected more calls to prompt_for_text"
+            );
+        }
+    }
+
+    pub struct AssertExpect {
+        assert: AssertPromptText<Building>,
+        state: AssertState,
+    }
+
+    impl AssertExpect {
+        pub fn with_initial_value(mut self, value: impl Into<Matcher>) -> Self {
+            self.state.initial_matcher = value.into();
+            self
         }
 
-        pub fn next(&self, expect: Field, next: Field) {
-            match self.0.get() {
-                f if f == expect => self.0.set(next),
-                f => panic!("Expected field {} but got {}", expect, f),
-            }
+        pub fn returns(mut self, value: impl Into<Returns>) -> AssertPromptText<Building> {
+            self.state.produced_value = value.into();
+            self.assert.states.push(self.state);
+            self.assert
         }
 
-        pub fn with(&self, mut check: impl FnMut(Field) -> Field) {
-            let current = self.0.get();
-            match check(current) {
-                Field::Unexpected => panic!("Unexpected field: {}", current),
-                otherwise => self.0.set(otherwise),
-            }
+        pub fn expect(mut self, field: Field) -> Self {
+            self.assert.states.push(self.state);
+            self.assert.expect(field)
         }
 
-        pub fn get<T>(&self, mut fun: impl FnMut(Field) -> Option<T>) -> T {
-            let current = self.0.get();
-            match fun(current) {
-                Some(value) => value,
-                None => panic!("Unexpected field: {}", current),
+        pub fn done(mut self) -> AssertPromptText<Finished> {
+            self.assert.states.push(self.state);
+            self.assert.done()
+        }
+    }
+
+    pub enum Matcher {
+        Any,
+        None,
+        Equals(String),
+        Passes(Box<dyn Fn(&str)>),
+    }
+
+    pub struct Any;
+
+    impl From<Any> for Matcher {
+        fn from(_: Any) -> Self {
+            Self::Any
+        }
+    }
+
+    impl From<&str> for Matcher {
+        fn from(value: &str) -> Self {
+            Self::Equals(String::from(value))
+        }
+    }
+
+    impl From<&String> for Matcher {
+        fn from(value: &String) -> Self {
+            Self::Equals(value.clone())
+        }
+    }
+
+    impl From<String> for Matcher {
+        fn from(value: String) -> Self {
+            Self::Equals(value)
+        }
+    }
+
+    impl<F: Fn(&str) + 'static> From<F> for Matcher {
+        fn from(value: F) -> Self {
+            Self::Passes(Box::new(value))
+        }
+    }
+
+    impl From<Option<Infallible>> for Matcher {
+        fn from(_: Option<Infallible>) -> Self {
+            Self::None
+        }
+    }
+
+    impl Matcher {
+        fn matches(&self, value: Option<&str>) {
+            match self {
+                Self::Any => {}
+                Self::None => assert_eq!(value, None),
+                Self::Equals(s) => assert_eq!(value, Some(s.as_str())),
+                Self::Passes(f) => f(value.unwrap()),
             }
         }
     }
 
-    #[macro_export]
-    macro_rules! next {
-        ($($pat:pat => $expr:expr),+ $(,)?) => {
-            |field| match field {
-                $($pat => $expr,)+
-                _ => Field::Unexpected,
-            }
-        };
+    pub enum Returns {
+        Field,
+        Initial,
+        Value(String),
     }
 
-    #[macro_export]
-    macro_rules! partial {
-        ($($pat:pat => $expr:expr),+ $(,)?) => {
-            |field| match field {
-                $($pat => Some($expr),)+
-                _ => None,
+    pub struct Initial;
+
+    impl From<Initial> for Returns {
+        fn from(_: Initial) -> Self {
+            Self::Initial
+        }
+    }
+
+    impl From<Field> for Returns {
+        fn from(value: Field) -> Self {
+            Self::Value(value.to_string())
+        }
+    }
+
+    impl From<&str> for Returns {
+        fn from(value: &str) -> Self {
+            Self::Value(String::from(value))
+        }
+    }
+
+    impl From<&String> for Returns {
+        fn from(value: &String) -> Self {
+            Self::Value(value.clone())
+        }
+    }
+
+    impl From<String> for Returns {
+        fn from(value: String) -> Self {
+            Self::Value(value)
+        }
+    }
+
+    impl Returns {
+        fn returns(self, field: Field, initial: Option<String>) -> String {
+            match self {
+                Self::Field => field.to_string(),
+                Self::Initial => initial.unwrap(),
+                Self::Value(value) => value,
             }
-        };
+        }
+    }
+
+    struct AssertState {
+        current_field: Field,
+        initial_matcher: Matcher,
+        produced_value: Returns,
+    }
+
+    pub enum Building {}
+    pub enum Finished {}
+
+    impl PromptText for AssertPromptText<Finished> {
+        fn prompt_for_text<V: Validator>(
+            &mut self,
+            field: Field,
+            id: &str,
+            initial: Option<String>,
+            validator: V,
+        ) -> Result<String> {
+            let AssertState {
+                current_field,
+                initial_matcher,
+                produced_value,
+            } = match self.states.pop() {
+                Some(state) => state,
+                None => return NoUi.prompt_for_text(field, id, initial, validator),
+            };
+
+            assert_eq!(id, self.id);
+            assert_eq!(current_field, field);
+            initial_matcher.matches(initial.as_deref());
+            Ok(produced_value.returns(field, initial))
+        }
     }
 
     pub struct ColorGuard(bool);
@@ -598,11 +775,8 @@ pub mod util {
 mod tests {
     use super::util::{disable_colors, prompt_alias, prompt_text, select_many, select_one, NoUi};
     use super::*;
-    use crate::{
-        data::tests::{drv1, nav1, nav2},
-        next, partial,
-        ui::util::ExpectField,
-    };
+    use crate::data::tests::{drv1, nav1, nav2};
+    use crate::ui::util::{AssertPromptText, Initial};
     use std::cell::Cell;
 
     #[test]
@@ -697,31 +871,24 @@ mod tests {
 
     #[test]
     fn complete_new_nav_with_no_input() {
-        let ask_for = ExpectField::new(Field::Alias);
-
-        let text = prompt_text(|field, id, initial| {
-            assert_eq!(id, "alias");
-            assert_eq!(initial.as_deref(), None);
-
-            ask_for.expect(field);
-            ask_for.with(next! {
-                Field::Name => Field::Email,
-                Field::Email => Field::Done,
-            });
-
-            Ok(field.to_string())
-        });
+        let mut text = AssertPromptText::start("alias")
+            .expect(Field::Name)
+            .expect(Field::Email)
+            .done();
 
         let alias = prompt_alias(|kind| {
             assert_eq!(kind, Kind::Navigator);
-            ask_for.next(Field::Alias, Field::Name);
             Ok(String::from("alias"))
         });
 
-        let nav =
-            complete_new_nav((text, alias), PartialNav::default(), &Config::default()).unwrap();
+        let nav = complete_new_nav(
+            (text.as_ui(), alias),
+            PartialNav::default(),
+            &Config::default(),
+        )
+        .unwrap();
 
-        ask_for.expect_done();
+        text.expect_done();
         assert_eq!(nav.alias.0, "alias");
         assert_eq!(nav.name, "name");
         assert_eq!(nav.email, "email");
@@ -729,39 +896,25 @@ mod tests {
 
     #[test]
     fn complete_new_nav_with_name() {
-        let ask_for = ExpectField::new(Field::Alias);
-
-        let text = prompt_text(|field, id, initial| {
-            assert_eq!(id, "alias");
-
-            ask_for.expect(field);
-            ask_for.with(next! {
-                Field::Name => {
-                    assert_eq!(initial.as_deref(), Some("some name"));
-                    Field::Email
-                },
-                Field::Email => {
-                    assert_eq!(initial.as_deref(), None);
-                    Field::Done
-                },
-            });
-
-            Ok(field.to_string())
-        });
+        let mut text = AssertPromptText::start("alias")
+            .expect(Field::Name)
+            .with_initial_value("some name")
+            .expect(Field::Email)
+            .done();
 
         let alias = prompt_alias(|kind| {
             assert_eq!(kind, Kind::Navigator);
-            ask_for.next(Field::Alias, Field::Name);
             Ok(String::from("alias"))
         });
 
         let nav = complete_new_nav(
-            (text, alias),
+            (text.as_ui(), alias),
             PartialNav::default().with_name(String::from("some name")),
             &Config::default(),
         )
         .unwrap();
-        ask_for.expect_done();
+
+        text.expect_done();
         assert_eq!(nav.alias.0, "alias");
         assert_eq!(nav.name, "name");
         assert_eq!(nav.email, "email");
@@ -799,105 +952,58 @@ mod tests {
 
     #[test]
     fn complete_existing_nav_with_no_input() {
-        let ask_for = ExpectField::new(Field::Alias);
         let navigator = nav1();
 
-        let text = prompt_text(|field, id, initial| {
-            assert_eq!(id, navigator.id().as_ref());
-            ask_for.expect(field);
+        let mut text = AssertPromptText::start(navigator.id())
+            .expect(Field::Name)
+            .with_initial_value(&navigator.name)
+            .returns(Initial)
+            .expect(Field::Email)
+            .with_initial_value(&navigator.email)
+            .returns(Initial)
+            .done();
 
-            let value = ask_for.get(partial! {
-                Field::Name => navigator.name.clone(),
-                Field::Email => navigator.email.clone(),
-            });
+        let config = Config::from_iter([navigator.clone()]);
+        let nav = complete_existing_nav(text.as_ui(), PartialIdNav::new(navigator.id()), &config)
+            .unwrap();
 
-            ask_for.with(next! {
-                Field::Name => {
-                    assert_eq!(initial.as_deref(), Some(navigator.name.as_str()));
-                    Field::Email
-                },
-                Field::Email => {
-                    assert_eq!(initial.as_deref(), Some(navigator.email.as_str()));
-                    Field::Done
-                },
-            });
-
-            Ok(value)
-        });
-
-        let alias = prompt_alias(|kind| {
-            assert_eq!(kind, Kind::Navigator);
-            ask_for.next(Field::Alias, Field::Name);
-            Ok(navigator.alias.0.clone())
-        });
-
-        let config = Config::from_iter([nav1()]);
-
-        let nav = complete_existing_nav((text, alias), PartialNav::default(), &config).unwrap();
-        ask_for.expect_done();
+        text.expect_done();
         assert_eq!(nav, navigator);
     }
 
     #[test]
     fn complete_existing_nav_with_name() {
-        let ask_for = ExpectField::new(Field::Alias);
         let navigator = nav1();
 
-        let text = prompt_text(|field, id, initial| {
-            assert_eq!(id, navigator.id().as_ref());
-            ask_for.expect(field);
+        let mut text = AssertPromptText::start(navigator.id())
+            .expect(Field::Name)
+            .with_initial_value("some name")
+            .returns(&navigator.name)
+            .expect(Field::Email)
+            .with_initial_value(&navigator.email)
+            .returns(Initial)
+            .done();
 
-            let value = ask_for.get(partial! {
-                Field::Name => navigator.name.clone(),
-                Field::Email => navigator.email.clone(),
-            });
-
-            ask_for.with(next! {
-                Field::Name => {
-                    assert_eq!(initial.as_deref(), Some("some name"));
-                    Field::Email
-                },
-                Field::Email => {
-                    assert_eq!(initial.as_deref(), Some(navigator.email.as_str()));
-                    Field::Done
-                },
-            });
-
-            Ok(value)
-        });
-
-        let alias = prompt_alias(|kind| {
-            assert_eq!(kind, Kind::Navigator);
-            ask_for.next(Field::Alias, Field::Name);
-            Ok(navigator.alias.0.clone())
-        });
-
-        let config = Config::from_iter([nav1()]);
+        let config = Config::from_iter([navigator.clone()]);
 
         let nav = complete_existing_nav(
-            (text, alias),
-            PartialNav::default().with_name(String::from("some name")),
+            text.as_ui(),
+            PartialIdNav::new(navigator.id()).with_name("some name"),
             &config,
         )
         .unwrap();
-        ask_for.expect_done();
+
+        text.expect_done();
         assert_eq!(nav, navigator);
     }
 
     #[test]
     fn complete_existing_nav_id_validation() {
-        let alias = Cell::new("nav2");
-
-        let prompt = prompt_alias(|kind| {
-            assert_eq!(kind, Kind::Navigator);
-            Ok(String::from(alias.get()))
-        });
-
         let _guard = disable_colors();
 
         let err = complete_existing_nav(
-            (NoUi, prompt),
-            PartialNav::default(),
+            NoUi,
+            PartialIdNav::new("nav2"),
             &Config::from_iter([nav1()]),
         )
         .unwrap_err()
@@ -905,9 +1011,7 @@ mod tests {
 
         assert_eq!(err, "Alias nav2 does not exist.");
 
-        alias.set("");
-
-        let err = complete_existing_nav((NoUi, prompt), PartialNav::default(), &Config::default())
+        let err = complete_existing_nav(NoUi, PartialIdNav::new(""), &Config::default())
             .unwrap_err()
             .to_string();
 
@@ -916,31 +1020,25 @@ mod tests {
 
     #[test]
     fn complete_new_drv_with_no_input() {
-        let ask_for = ExpectField::new(Field::Alias);
-
-        let text = prompt_text(|field, id, initial| {
-            assert_eq!(id, "alias");
-            assert_eq!(initial.as_deref(), None);
-
-            ask_for.expect(field);
-            ask_for.with(next! {
-                Field::Name => Field::Email,
-                Field::Email => Field::Key,
-                Field::Key => Field::Done,
-            });
-
-            Ok(field.to_string())
-        });
+        let mut text = AssertPromptText::start("alias")
+            .expect(Field::Name)
+            .expect(Field::Email)
+            .expect(Field::Key)
+            .done();
 
         let alias = prompt_alias(|kind| {
             assert_eq!(kind, Kind::Driver);
-            ask_for.next(Field::Alias, Field::Name);
             Ok(String::from("alias"))
         });
 
-        let drv =
-            complete_new_drv((text, alias), PartialNav::default(), &Config::default()).unwrap();
-        ask_for.expect_done();
+        let drv = complete_new_drv(
+            (text.as_ui(), alias),
+            PartialNav::default(),
+            &Config::default(),
+        )
+        .unwrap();
+
+        text.expect_done();
         assert_eq!(drv.navigator.alias.0, "alias");
         assert_eq!(drv.navigator.name, "name");
         assert_eq!(drv.navigator.email, "email");
@@ -949,43 +1047,26 @@ mod tests {
 
     #[test]
     fn complete_new_drv_with_name() {
-        let ask_for = ExpectField::new(Field::Alias);
-
-        let text = prompt_text(|field, id, initial| {
-            assert_eq!(id, "alias");
-
-            ask_for.expect(field);
-            ask_for.with(next! {
-                Field::Name => {
-                    assert_eq!(initial.as_deref(), Some("some name"));
-                    Field::Email
-                },
-                Field::Email => {
-                    assert_eq!(initial.as_deref(), None);
-                    Field::Key
-                },
-                Field::Key => {
-                    assert_eq!(initial.as_deref(), None);
-                    Field::Done
-                },
-            });
-
-            Ok(field.to_string())
-        });
+        let mut text = AssertPromptText::start("alias")
+            .expect(Field::Name)
+            .with_initial_value("some name")
+            .expect(Field::Email)
+            .expect(Field::Key)
+            .done();
 
         let alias = prompt_alias(|kind| {
             assert_eq!(kind, Kind::Driver);
-            ask_for.next(Field::Alias, Field::Name);
             Ok(String::from("alias"))
         });
 
         let drv = complete_new_drv(
-            (text, alias),
+            (text.as_ui(), alias),
             PartialNav::default().with_name(String::from("some name")),
             &Config::default(),
         )
         .unwrap();
-        ask_for.expect_done();
+
+        text.expect_done();
         assert_eq!(drv.navigator.alias.0, "alias");
         assert_eq!(drv.navigator.name, "name");
         assert_eq!(drv.navigator.email, "email");
@@ -1037,98 +1118,59 @@ mod tests {
 
     #[test]
     fn complete_existing_drv_with_no_input() {
-        let ask_for = ExpectField::new(Field::Alias);
         let driver = drv1("a key");
 
-        let text = prompt_text(|field, id, initial| {
-            assert_eq!(id, driver.id().as_ref());
-            ask_for.expect(field);
-
-            let value = ask_for.get(partial! {
-                Field::Name => driver.navigator.name.clone(),
-                Field::Email => driver.navigator.email.clone(),
-                Field::Key => driver.key.clone().unwrap_or_default(),
-            });
-
-            ask_for.with(next! {
-                Field::Name => {
-                    assert_eq!(initial.as_deref(), Some(driver.navigator.name.as_str()));
-                    Field::Email
-                },
-                Field::Email => {
-                    assert_eq!(initial.as_deref(), Some(driver.navigator.email.as_str()));
-                    Field::Key
-                },
-                Field::Key => {
-                    assert_eq!(initial.as_deref(), driver.key.as_deref());
-                    Field::Done
-                },
-            });
-
-            Ok(value)
-        });
-
-        let alias = prompt_alias(|kind| {
-            assert_eq!(kind, Kind::Driver);
-            ask_for.next(Field::Alias, Field::Name);
-            Ok(driver.navigator.alias.0.clone())
-        });
+        let mut text = AssertPromptText::start(driver.id())
+            .expect(Field::Name)
+            .with_initial_value(&driver.navigator.name)
+            .returns(Initial)
+            .expect(Field::Email)
+            .with_initial_value(&driver.navigator.email)
+            .returns(Initial)
+            .expect(Field::Key)
+            .with_initial_value("a key")
+            .returns(Initial)
+            .done();
 
         let config = Config::from_iter([driver.clone()]);
 
-        let drv = complete_existing_drv((text, alias), PartialNav::default(), &config).unwrap();
-        ask_for.expect_done();
+        let drv = complete_existing_drv(
+            text.as_ui(),
+            PartialIdNav::new(driver.id().as_ref()),
+            &config,
+        )
+        .unwrap();
+
+        text.expect_done();
         assert_eq!(drv, driver);
     }
 
     #[test]
     fn complete_existing_drv_with_name() {
-        let ask_for = ExpectField::new(Field::Alias);
         let driver = drv1("a key");
 
-        let text = prompt_text(|field, id, initial| {
-            assert_eq!(id, driver.id().as_ref());
-            ask_for.expect(field);
-
-            let value = ask_for.get(partial! {
-                Field::Name => driver.navigator.name.clone(),
-                Field::Email => driver.navigator.email.clone(),
-                Field::Key => driver.key.clone().unwrap_or_default(),
-            });
-
-            ask_for.with(next! {
-                Field::Name => {
-                    assert_eq!(initial.as_deref(), Some("some name"));
-                    Field::Email
-                },
-                Field::Email => {
-                    assert_eq!(initial.as_deref(), Some(driver.navigator.email.as_str()));
-                    Field::Key
-                },
-                Field::Key => {
-                    assert_eq!(initial.as_deref(), driver.key.as_deref());
-                    Field::Done
-                },
-            });
-
-            Ok(value)
-        });
-
-        let alias = prompt_alias(|kind| {
-            assert_eq!(kind, Kind::Driver);
-            ask_for.next(Field::Alias, Field::Name);
-            Ok(driver.navigator.alias.0.clone())
-        });
+        let mut text = AssertPromptText::start(driver.id())
+            .expect(Field::Name)
+            .with_initial_value("some name")
+            .returns(&driver.navigator.name)
+            .expect(Field::Email)
+            .with_initial_value(&driver.navigator.email)
+            .returns(Initial)
+            .expect(Field::Key)
+            .with_initial_value("a key")
+            .returns(Initial)
+            .done();
 
         let config = Config::from_iter([driver.clone()]);
 
         let drv = complete_existing_drv(
-            (text, alias),
-            PartialNav::default().with_name(String::from("some name")),
+            text.as_ui(),
+            PartialIdNav::new(driver.id()).with_name("some name"),
             &config,
         )
         .unwrap();
-        ask_for.expect_done();
+
+        text.expect_done();
         assert_eq!(drv, driver);
     }
 
@@ -1139,37 +1181,26 @@ mod tests {
             otherwise => Ok(otherwise.to_string()),
         });
 
-        let alias = prompt_alias(|_kind| Ok(String::from("drv1")));
-
         let config = Config::from_iter([drv1(None)]);
 
-        let drv = complete_existing_drv((text, alias), PartialNav::default(), &config).unwrap();
+        let drv = complete_existing_drv(text, PartialIdNav::new("drv1"), &config).unwrap();
 
         assert_eq!(drv.key, None);
     }
 
     #[test]
     fn complete_existing_drv_id_validation() {
-        let alias = Cell::new("drv2");
-
-        let prompt = prompt_alias(|kind| {
-            assert_eq!(kind, Kind::Driver);
-            Ok(String::from(alias.get()))
-        });
-
         let _guard = disable_colors();
 
         let config = Config::from_iter([drv1(None)]);
 
-        let err = complete_existing_drv((NoUi, prompt), PartialNav::default(), &config)
+        let err = complete_existing_drv(NoUi, PartialIdNav::new("drv2"), &config)
             .unwrap_err()
             .to_string();
 
         assert_eq!(err, "Alias drv2 does not exist.");
 
-        alias.set("");
-
-        let err = complete_existing_drv((NoUi, prompt), PartialNav::default(), &config)
+        let err = complete_existing_drv(NoUi, PartialIdNav::new(""), &config)
             .unwrap_err()
             .to_string();
 

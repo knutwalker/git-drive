@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    data::{Kind, Modification, PartialNav},
+    data::{Kind, Modification, PartialIdNav, PartialNav},
     ui::{self, PromptAlias, PromptText, SelectOne},
 };
 use eyre::{bail, Result};
@@ -11,10 +11,14 @@ pub fn run(
     config: &mut Config,
     mut new: PartialNav,
 ) -> Result<Modification> {
-    if new.id.is_none() {
-        new.id = Some(select_existing_id(&mut ui, kind, config)?);
-    }
-    edit(ui, kind, config, new)
+    let id = match new.id.take() {
+        Some(id) => id,
+        None => select_existing_id(&mut ui, kind, config)?,
+    };
+
+    let partial = PartialIdNav::new(id).merge(new);
+
+    edit(ui, kind, config, partial)
 }
 
 fn select_existing_id(ui: impl SelectOne, kind: Kind, config: &Config) -> Result<String> {
@@ -29,13 +33,11 @@ fn select_existing_id(ui: impl SelectOne, kind: Kind, config: &Config) -> Result
 }
 
 fn edit(
-    ui: impl PromptAlias + PromptText,
+    ui: impl PromptText,
     kind: Kind,
     config: &mut Config,
-    new: PartialNav,
+    new: PartialIdNav,
 ) -> Result<Modification> {
-    debug_assert!(new.id.is_some());
-
     match kind {
         Kind::Navigator => {
             let navigator = ui::complete_existing_nav(ui, new, config)?;
@@ -74,10 +76,10 @@ mod tests {
     use crate::{
         data::{
             tests::{drv1, nav1, nav2},
-            Field, Id, Navigator,
+            Driver, Field, Id, Navigator,
         },
         ui::{
-            util::{prompt_alias, prompt_text, select_one, NoUi},
+            util::{disable_colors, prompt_text, select_one, AssertPromptText, Initial, NoUi},
             Selectable,
         },
     };
@@ -139,37 +141,34 @@ mod tests {
     }
 
     #[test]
+    fn test_select_out_of_bounds() {
+        let ui = select_one(|_kind, _items| Ok(usize::MAX));
+        let config = Config::from_iter([nav1(), nav2()]);
+        let selected = select_existing_id(ui, Kind::Navigator, &config).unwrap_err();
+        assert_eq!(selected.to_string(), "No navigators to edit");
+    }
+
+    #[test]
     fn test_edit_existing_navigator() {
-        let text = prompt_text(|field, id, initial| {
-            assert_eq!(id, "nav1");
-
-            Ok(match field {
-                Field::Name => {
-                    assert_eq!(initial.as_deref(), Some("bernd"));
-                    String::from("new name")
-                }
-                Field::Email => {
-                    assert_eq!(initial.as_deref(), Some("foo@bar.org"));
-                    String::from("new email")
-                }
-                _ => panic!("Unexpected field: {}", field),
-            })
-        });
-
-        let alias = prompt_alias(|kind| {
-            assert_eq!(kind, Kind::Navigator);
-            Ok(String::from("nav1"))
-        });
+        let mut text = AssertPromptText::start("nav1")
+            .expect(Field::Name)
+            .with_initial_value("bernd")
+            .returns("new name")
+            .expect(Field::Email)
+            .with_initial_value("foo@bar.org")
+            .returns("new email")
+            .done();
 
         let mut config = Config::from_iter([nav1().ent(), nav2().ent(), drv1(None).ent()]);
         let modified = edit(
-            (text, alias),
+            text.as_ui(),
             Kind::Navigator,
             &mut config,
-            PartialNav::default().with_id(String::from("nav1")),
+            PartialIdNav::new("nav1"),
         )
         .unwrap();
 
+        text.expect_done();
         assert_eq!(modified, Modification::Changed);
         assert_eq!(
             &config.navigators,
@@ -185,145 +184,171 @@ mod tests {
         assert_eq!(&config.drivers, &[drv1(None)]);
     }
 
-    // #[test]
-    // fn test_delete_non_existing() {
-    //     let mut config = Config::from_iter([nav1().ent(), nav2().ent(), drv1(None).ent()]);
-    //     let modified = run(Kind::Navigator, &mut config, &[Id::from("non existing")]);
-    //     assert_eq!(modified, Modification::Unchanged);
-    //     assert_eq!(&config.navigators, &[nav1(), nav2()]);
-    //     assert_eq!(&config.drivers, &[drv1(None)]);
-    // }
+    #[test]
+    fn test_edit_non_existing_navigator() {
+        let _guard = disable_colors();
 
-    // #[test]
-    // fn test_delete_from_empty_config() {
-    //     let mut config = Config::default();
-    //     let modified = select(NoUi, Kind::Navigator, &mut config).unwrap();
-    //     assert_eq!(modified, Modification::Unchanged);
-    //     assert_eq!(&config.navigators, &[]);
-    //     assert_eq!(&config.drivers, &[]);
-    // }
+        let mut config = Config::from_iter([nav1()]);
+        let result = edit(
+            NoUi,
+            Kind::Navigator,
+            &mut config,
+            PartialIdNav::new("does not exist"),
+        )
+        .unwrap_err();
 
-    // #[test]
-    // fn test_delete_from_empty_selection() {
-    //     let ui = select_many(|kind, items| {
-    //         assert_eq!(kind, Kind::Navigator);
-    //         assert_eq!(
-    //             items,
-    //             &[
-    //                 Selectable {
-    //                     item: "nav1",
-    //                     checked: false
-    //                 },
-    //                 Selectable {
-    //                     item: "nav2",
-    //                     checked: false
-    //                 }
-    //             ]
-    //         );
-    //         Ok(Vec::new())
-    //     });
-    //     let mut config = Config::from_iter([nav1().ent(), nav2().ent(), drv1(None).ent()]);
-    //     let modified = select(ui, Kind::Navigator, &mut config).unwrap();
-    //     assert_eq!(modified, Modification::Unchanged);
-    //     assert_eq!(&config.navigators, &[nav1(), nav2()]);
-    //     assert_eq!(&config.drivers, &[drv1(None)]);
-    // }
+        assert_eq!(result.to_string(), "Alias does not exist does not exist.");
+        assert_eq!(config, Config::from_iter([nav1()]));
+    }
 
-    // #[test]
-    // fn test_delete_from_single_selection() {
-    //     let ui = select_many(|kind, items| {
-    //         assert_eq!(kind, Kind::Navigator);
-    //         assert_eq!(
-    //             items,
-    //             &[
-    //                 Selectable {
-    //                     item: "nav1",
-    //                     checked: false
-    //                 },
-    //                 Selectable {
-    //                     item: "nav2",
-    //                     checked: false
-    //                 }
-    //             ]
-    //         );
-    //         Ok(vec![0])
-    //     });
-    //     let mut config = Config::from_iter([nav1().ent(), nav2().ent(), drv1(None).ent()]);
-    //     let modified = select(ui, Kind::Navigator, &mut config).unwrap();
-    //     assert_eq!(modified, Modification::Changed);
-    //     assert_eq!(&config.navigators, &[nav2()]);
-    //     assert_eq!(&config.drivers, &[drv1(None)]);
-    // }
+    #[test]
+    fn test_edit_existing_navigator_without_change() {
+        let text = prompt_text(|_field, _id, initial| Ok(initial.unwrap()));
 
-    // #[test]
-    // fn test_delete_driver_from_single_selection() {
-    //     let ui = select_many(|kind, items| {
-    //         assert_eq!(kind, Kind::Driver);
-    //         assert_eq!(
-    //             items,
-    //             &[Selectable {
-    //                 item: "drv1",
-    //                 checked: false
-    //             },]
-    //         );
-    //         Ok(vec![0])
-    //     });
-    //     let mut config = Config::from_iter([nav1().ent(), nav2().ent(), drv1(None).ent()]);
-    //     let modified = select(ui, Kind::Driver, &mut config).unwrap();
-    //     assert_eq!(modified, Modification::Changed);
-    //     assert_eq!(&config.navigators, &[nav1(), nav2()]);
-    //     assert_eq!(&config.drivers, &[]);
-    // }
+        let mut config = Config::from_iter([nav1()]);
+        let modified = edit(
+            text,
+            Kind::Navigator,
+            &mut config,
+            PartialIdNav::new("nav1"),
+        )
+        .unwrap();
 
-    // #[test]
-    // fn test_delete_from_multiple_selection() {
-    //     let ui = select_many(|kind, items| {
-    //         assert_eq!(kind, Kind::Navigator);
-    //         assert_eq!(
-    //             items,
-    //             &[
-    //                 Selectable {
-    //                     item: "nav1",
-    //                     checked: false
-    //                 },
-    //                 Selectable {
-    //                     item: "nav2",
-    //                     checked: false
-    //                 }
-    //             ]
-    //         );
-    //         Ok(vec![0, 1])
-    //     });
-    //     let mut config = Config::from_iter([nav1().ent(), nav2().ent(), drv1(None).ent()]);
-    //     let modified = select(ui, Kind::Navigator, &mut config).unwrap();
-    //     assert_eq!(modified, Modification::Changed);
-    //     assert_eq!(&config.navigators, &[]);
-    //     assert_eq!(&config.drivers, &[drv1(None)]);
-    // }
+        assert_eq!(modified, Modification::Unchanged);
+        assert_eq!(config, Config::from_iter([nav1()]));
+    }
 
-    // #[test]
-    // fn test_delete_from_multiple_out_of_order_selection() {
-    //     let ui = select_many(|kind, items| {
-    //         assert_eq!(kind, Kind::Navigator);
-    //         assert_eq!(
-    //             items,
-    //             &[
-    //                 Selectable {
-    //                     item: "nav1",
-    //                     checked: false
-    //                 },
-    //                 Selectable {
-    //                     item: "nav2",
-    //                     checked: false
-    //                 }
-    //             ]
-    //         );
-    //         Ok(vec![1, 0])
-    //     });
-    //     let mut config = Config::from_iter([nav1().ent(), nav2().ent(), drv1(None).ent()]);
-    //     let modified = select(ui, Kind::Navigator, &mut config).unwrap();
-    //     assert_eq!(modified, Modification::Changed);
-    //     assert_eq!(&config.navigators, &[]);
-    //     assert_eq!(&config.drivers, &[drv1(None)]);
-    // }
+    #[test]
+    fn test_edit_existing_navigator_with_provided_values() {
+        let partial = PartialIdNav::new("nav1")
+            .with_name("new name")
+            .with_email("new email");
+
+        let mut text = AssertPromptText::start("nav1")
+            .expect(Field::Name)
+            .with_initial_value(partial.name.as_deref().unwrap())
+            .returns(Initial)
+            .expect(Field::Email)
+            .with_initial_value(partial.email.as_deref().unwrap())
+            .returns(Initial)
+            .done();
+
+        let mut config = Config::from_iter([nav1()]);
+        let modified = edit(text.as_ui(), Kind::Navigator, &mut config, partial.clone()).unwrap();
+
+        text.expect_done();
+        assert_eq!(modified, Modification::Changed);
+        assert_eq!(
+            config,
+            Config::from_iter([Navigator {
+                alias: Id::from("nav1"),
+                name: partial.name.unwrap(),
+                email: partial.email.unwrap()
+            }])
+        );
+    }
+
+    #[test]
+    fn test_edit_existing_driver() {
+        let mut text = AssertPromptText::start("drv1")
+            .expect(Field::Name)
+            .with_initial_value("ralle")
+            .returns("new name")
+            .expect(Field::Email)
+            .with_initial_value("qux@bar.org")
+            .returns("new email")
+            .expect(Field::Key)
+            .with_initial_value("initial key")
+            .returns("new key")
+            .done();
+
+        let mut config = Config::from_iter([nav1().ent(), nav2().ent(), drv1("initial key").ent()]);
+        let modified = edit(
+            text.as_ui(),
+            Kind::Driver,
+            &mut config,
+            PartialIdNav::new("drv1"),
+        )
+        .unwrap();
+
+        text.expect_done();
+        assert_eq!(modified, Modification::Changed);
+        assert_eq!(&config.navigators, &[nav1(), nav2()]);
+        assert_eq!(
+            &config.drivers,
+            &[Driver {
+                navigator: Navigator {
+                    alias: Id(String::from("drv1")),
+                    name: String::from("new name"),
+                    email: String::from("new email"),
+                },
+                key: Some(String::from("new key"))
+            }]
+        );
+    }
+
+    #[test]
+    fn test_edit_non_existing_driver() {
+        let _guard = disable_colors();
+
+        let mut config = Config::from_iter([drv1(None)]);
+        let result = edit(
+            NoUi,
+            Kind::Driver,
+            &mut config,
+            PartialIdNav::new("does not exist"),
+        )
+        .unwrap_err();
+
+        assert_eq!(result.to_string(), "Alias does not exist does not exist.");
+        assert_eq!(config, Config::from_iter([drv1(None)]));
+    }
+
+    #[test]
+    fn test_edit_existing_driver_without_change() {
+        let text = prompt_text(|_field, _id, initial| Ok(initial.unwrap()));
+
+        let mut config = Config::from_iter([drv1("key")]);
+        let modified = edit(text, Kind::Driver, &mut config, PartialIdNav::new("drv1")).unwrap();
+
+        assert_eq!(modified, Modification::Unchanged);
+        assert_eq!(config, Config::from_iter([drv1("key")]));
+    }
+
+    #[test]
+    fn test_edit_existing_driver_with_provided_values() {
+        let partial = PartialIdNav::new("drv1")
+            .with_name("new name")
+            .with_email("new email")
+            .with_key("new key");
+
+        let mut text = AssertPromptText::start("drv1")
+            .expect(Field::Name)
+            .with_initial_value(partial.name.as_deref().unwrap())
+            .returns(Initial)
+            .expect(Field::Email)
+            .with_initial_value(partial.email.as_deref().unwrap())
+            .returns(Initial)
+            .expect(Field::Key)
+            .with_initial_value(partial.key.as_deref().unwrap())
+            .returns(Initial)
+            .done();
+
+        let mut config = Config::from_iter([drv1("key")]);
+        let modified = edit(text.as_ui(), Kind::Driver, &mut config, partial.clone()).unwrap();
+
+        text.expect_done();
+        assert_eq!(modified, Modification::Changed);
+        assert_eq!(
+            config,
+            Config::from_iter([Driver {
+                navigator: Navigator {
+                    alias: Id::from("drv1"),
+                    name: partial.name.unwrap(),
+                    email: partial.email.unwrap()
+                },
+                key: partial.key
+            }])
+        );
+    }
 }
