@@ -755,6 +755,39 @@ mod tests {
     }
 
     #[test]
+    fn infer_commands() {
+        fn test(short: &str, full: &str) {
+            let short = short.split_whitespace();
+            let full = full.split_whitespace();
+            let short = Action::parse_from(short);
+            let full = Action::parse_from(full);
+            assert_eq!(short, full);
+        }
+
+        test("w foo", "with foo");
+        test("w foo bar", "with foo bar");
+
+        test("al", "alone");
+
+        test("l", "list");
+        test("l me", "list me");
+
+        test("s", "show");
+
+        test("n", "new");
+        test("e", "edit");
+        test("d", "delete");
+        test("d foo", "delete foo");
+        test("d foo bar", "delete foo bar");
+
+        test("m n", "me new");
+        test("m e", "me edit");
+        test("m d", "me delete");
+        test("m d foo", "me delete foo");
+        test("m d foo bar", "me delete foo bar");
+    }
+
+    #[test]
     fn version_flag() {
         let (_, res) = Action::try_parse_from(["--version"]).unwrap_err();
         assert_eq!(res.kind(), ErrorKind::DisplayVersion);
