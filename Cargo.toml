@@ -20,7 +20,7 @@ clap = { version = "4.0.18", default-features = false, features = [
 ] }
 co-authors = "0.1.0"
 console = "=0.15.1" # keep at 0.15.1 to avoid lazy_static dependency
-dialoguer = { version = "0.10.2", default-features = false }
+dialoguer = { version = "0.10.3", default-features = false }
 directories = "4.0.1"
 eyre = "0.6.8"
 nom = "7.1.1"
