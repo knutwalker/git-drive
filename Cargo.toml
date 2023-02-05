@@ -1,5 +1,5 @@
 [package]
-name = "git_drive"
+name = "git-drive"
 version = "0.5.1"
 authors = ["Paul Horn <developer@knutwalker.de>"]
 description = "Support for switching git authors and co-authors"
