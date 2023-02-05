@@ -50,7 +50,6 @@ split-debuginfo = "packed"
 pre-release-commit-message = "Release {{crate_name}} {{version}}"
 sign-commit = true
 sign-tag = true
-dev-version = false
 
 [[bin]]
 name = "git-drive"
