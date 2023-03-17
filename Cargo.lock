@@ -12,11 +12,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "assert_fs"
-version = "1.0.10"
+name = "anstyle"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d94b2a3f3786ff2996a98afbd6b4e5b7e890d685ccf67577f508ee2342c71cc9"
+checksum = "1ba0b55c2201aa802adb684e7963ce2c3191675629e7df899774331e3ac747cf"
+
+[[package]]
+name = "assert_fs"
+version = "1.0.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9d5bf7e5441c6393b5a9670a5036abe6b4847612f594b870f7332dbf10cf6fa"
 dependencies = [
+ "anstyle",
  "doc-comment",
  "globwalk",
  "predicates",
@@ -328,10 +335,11 @@ checksum = "9b7820b9daea5457c9f21c69448905d723fbd21136ccf521748f23fd49e723ee"
 
 [[package]]
 name = "predicates"
-version = "2.1.5"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59230a63c37f3e18569bdb90e4a89cbf5bf8b06fea0b84e65ea10cc4df47addd"
+checksum = "1ba7d6ead3e3966038f68caa9fc1f860185d95a793180bbcfe0d0da47b3961ed"
 dependencies = [
+ "anstyle",
  "difflib",
  "itertools",
  "predicates-core",
@@ -339,9 +347,9 @@ dependencies = [
 
 [[package]]
 name = "predicates-core"
-version = "1.0.5"
+version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72f883590242d3c6fc5bf50299011695fa6590c2c70eac95ee1bdb9a733ad1a2"
+checksum = "b794032607612e7abeb4db69adb4e33590fa6cf1149e95fd7cb00e634b92f174"
 
 [[package]]
 name = "predicates-tree"
